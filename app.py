@@ -1,17 +1,18 @@
 import streamlit as st
+from data_cleaning import render_data_cleaning
 
-from data_cleaning import run_data_cleaning
-
-st.set_page_config(
-    page_title="数据清洗系统",
-    layout="wide"
-)
+st.set_page_config(layout="wide")
 
 def main():
-    st.title("📊 数据清洗模块")
+    st.sidebar.title("导航")
 
-    # 直接调用数据清洗UI
-    run_data_cleaning()
+    page = st.sidebar.radio(
+        "选择模块",
+        ["数据清洗"]
+    )
+
+    if page == "数据清洗":
+        render_data_cleaning()
 
 if __name__ == "__main__":
     main()
