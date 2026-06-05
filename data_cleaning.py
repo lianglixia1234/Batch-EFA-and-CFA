@@ -837,7 +837,6 @@ def _render_dual_tab_preview_and_time(role: str, state_key: str):
                 f"剩余 {after_count} 行。"
             )
 
-            st.rerun(scope="app")
 
         except Exception as e:
             st.error(f"处理出错: {e}")
