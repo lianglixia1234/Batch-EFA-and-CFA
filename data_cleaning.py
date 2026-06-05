@@ -831,7 +831,7 @@ def _render_dual_tab_preview_and_time(role: str, state_key: str):
 
             after_count = len(st.session_state[state_key])
 
-            st.caption(
+            st.success(
                 f"一致性筛选完成："
                 f"已删除 {before_count - after_count} 行，"
                 f"剩余 {after_count} 行。"
