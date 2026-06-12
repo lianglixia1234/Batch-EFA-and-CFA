@@ -538,9 +538,12 @@ def check_residual_normality(df, loadings):
 # ==============================================================================
 
 def render_n1_analysis():
-    st.title("模块 2: N1数据分析 ")
+    st.title("📊 模块 2: N1数据分析 (批量自动化问卷模式)")
+    st.caption("系统将自动读取您在数据清洗阶段划分的所有 Measure，并依次执行全样本自动化迭代删题。")
 
-    # --- 1. 数据来源 ---
+    # ==========================================================================
+    # 1. 数据来源与 Measure 自动化识别
+    # ==========================================================================
     st.sidebar.markdown("### 数据来源设置")
     has_cached_data = 'sub_datasets' in st.session_state and len(st.session_state.sub_datasets) > 0
     has_dual_data = (
@@ -557,48 +560,46 @@ def render_n1_analysis():
 
     data_source = st.radio("请选择数据来源:", source_options, horizontal=True)
 
-    df_analysis = None
+    # 用字典统一存储待分析的 { "Measure名称": pd.DataFrame(包含其所属题项) }
+    measures_to_process = {}
+    user_selected_dataset = "Dataset1" # 默认
 
     if data_source == "💾 来自 Data Cleaning（四数据集）":
         from .data_cleaning_dual import get_dual_mode_analysis_df
         dataset_names = ["Dataset1", "Dataset2", "Dataset3", "Dataset4"]
         selected_dataset = st.selectbox("1. 选择数据集", dataset_names, key="n1_dual_dataset")
+        user_selected_dataset = selected_dataset
+        
         measure_names = list(st.session_state.dc_measures.keys())
         if not measure_names:
             st.warning("请在数据清洗模块的「Measure 划分」中至少定义一个 Measure。")
         else:
             selected_measures = st.multiselect(
-                "2. 选择 Measure（可多选）",
+                "2. 选择要批量运行的 Measure（可多选）",
                 measure_names,
-                default=[measure_names[0]] if measure_names else [],
+                default=measure_names,  # 默认全选，体现批量效率
                 key="n1_dual_measures",
             )
+            
             if selected_measures:
-                df_analysis = get_dual_mode_analysis_df(
-                    selected_dataset,
-                    selected_measures,
-                    st.session_state.dc_dataset_full,
-                    st.session_state.dc_measures,
-                    item_columns_only=True,
-                )
-                st.session_state.n1_selected_measures = list(selected_measures)
-            if df_analysis is not None:
-                st.info(f"使用 **{selected_dataset}**，Measure: **{', '.join(selected_measures)}**（{df_analysis.shape[0]} 行 × {df_analysis.shape[1]} 列，仅题目列）")
+                for m in selected_measures:
+                    df_m = get_dual_mode_analysis_df(
+                        selected_dataset,
+                        [m],
+                        st.session_state.dc_dataset_full,
+                        st.session_state.dc_measures,
+                        item_columns_only=True,
+                    )
+                    if df_m is not None and df_m.shape[1] >= 3:
+                        measures_to_process[m] = df_m
 
     elif data_source == "💾 来自 Data Cleaning（子数据集）":
         dataset_names = list(st.session_state.sub_datasets.keys())
         selected_name = st.selectbox("请选择已保存的子数据集:", dataset_names)
         if selected_name:
-            df_analysis = st.session_state.sub_datasets[selected_name]
-
-            update_info = ""
-            if ('sub_datasets_updated' in st.session_state and
-                selected_name in st.session_state.sub_datasets_updated):
-                update_time = st.session_state.sub_datasets_updated[selected_name]
-                update_info = f" (最后更新: {update_time.strftime('%H:%M:%S')})"
-
-            st.info(f"正在使用缓存数据集: **{selected_name}** ({df_analysis.shape[0]} 行, {df_analysis.shape[1]} 列){update_info}")
-            st.success("✅ 数据集包含最新的序号重命名结果")
+            df_sub = st.session_state.sub_datasets[selected_name]
+            # 尝试获取子数据集对应的题目划分，若无则全表作为一个 Measure
+            measures_to_process[selected_name] = df_sub
 
     else:
         uploaded_file = st.file_uploader("请上传用于分析的数据文件", type=['xlsx', 'xls', 'csv'])
@@ -607,15 +608,12 @@ def render_n1_analysis():
                 if uploaded_file.name.endswith(('.xlsx', '.xls')):
                     df_upload = pd.read_excel(uploaded_file)
                 else:
-                    df_upload = pd.read_csv(uploaded_file)
+                    df_upload = pd.read_csv(uploaded_csv)
                 st.write("文件预览 (前5行):")
                 st.dataframe(df_upload.head())
-                # <Function 1>：用户手动选择题目
-                # =========================================================
-                st.info("👇 请从上传的文件中，勾选需要进行 EFA 分析的【量表题目】（请勿勾选ID、姓名等无关列）")
                 
+                st.info("👇 请勾选需要进行分析的【量表题目】")
                 all_cols = df_upload.columns.tolist()
-                # 默认全选太乱，我们尝试简单的智能预选（选出数值类型的列），如果没有数值列则全选
                 numeric_cols = df_upload.select_dtypes(include=np.number).columns.tolist()
                 default_cols = numeric_cols if numeric_cols else all_cols
                 
@@ -624,660 +622,307 @@ def render_n1_analysis():
                     options=all_cols,
                     default=default_cols
                 )
-                
-                if len(selected_cols) < 3:
-                    st.warning("⚠️ 请至少选择 3 个题目才能进行分析。")
-                    df_analysis = None
-                else:
-                    # 只保留用户选中的列
-                    df_analysis = df_upload[selected_cols].copy()
-                    st.success(f"已选择 {len(selected_cols)} 个题目，共 {df_analysis.shape[0]} 行。")
-                # =========================================================
-            
+                if len(selected_cols) >= 3:
+                    measures_to_process["上传量表问卷"] = df_upload[selected_cols].copy()
             except Exception as e:
                 st.error(f"读取文件失败: {e}")
 
-    st.markdown("---")
-
-    # ⚠️ 关键检查：没有数据就 Return
-    if df_analysis is None:
-        if data_source == "📤 上传新文件 (Excel/CSV)":
-            st.info("👈 请先上传文件或选择数据来源。")
-        elif data_source == "💾 来自 Data Cleaning（四数据集）":
-            st.warning("请至少选择一个 Measure，或先在数据清洗中定义 Measure。")
-        else:
-            st.warning("👈 请先在上方选择数据来源。")
-        return
-    
-    # Altair 画图库不支持列名中包含英文冒号 ":"，因此把“：”改成“_”
-    df_analysis.columns = [str(col).replace(":", "_") for col in df_analysis.columns]
-    
-    # 数据预处理（三步法）：
-    # 第一步：逐列判断内容能否转为数字，识别出数字列
-    # 第二步：将数字列统一转换为数值类型
-    # 第三步：只用数字列进行 EFA 分析，文本列自动排除
-    numeric_cols = []
-    for col in df_analysis.columns:
-        converted = pd.to_numeric(df_analysis[col], errors='coerce')
-        non_null_original = df_analysis[col].notna().sum()
-        if non_null_original > 0 and converted.notna().sum() / non_null_original >= 0.5:
-            numeric_cols.append(col)
-    df_numeric = df_analysis[numeric_cols].apply(pd.to_numeric, errors='coerce').copy()
-    original_len = len(df_numeric)
-
-    # 移除包含NaN的行
-    df_numeric = df_numeric.dropna()
-
-    # 移除包含无穷大值(Inf)的行
-    df_numeric = df_numeric.replace([np.inf, -np.inf], np.nan).dropna()
-
-    # 再次检查是否有任何无穷大值（以防万一）
-    df_numeric = df_numeric[~df_numeric.isin([np.inf, -np.inf]).any(axis=1)]
-
-    cleaned_len = len(df_numeric)
-
-    removed_rows = original_len - cleaned_len
-    if removed_rows > 0:
-        st.caption(f"⚠️ 已自动移除含有非数值、缺失值或无穷大值的行。分析样本量: {original_len} -> {cleaned_len} (移除了 {removed_rows} 行)")
-
-    if cleaned_len < 10: # 再次兜底检查
-        st.error(f"❌ 有效样本量不足 ({cleaned_len} 行)，无法分析。请检查是否误选了包含大量文本的列。")
-        return
+    # ==========================================================================
+    # 2. 数据清洗与预处理沙盒 (对每个独立的 Measure 容器做数值强转)
+    # ==========================================================================
+    cleaned_measures_dict = {}
+    for m_name, df_raw in measures_to_process.items():
+        # Altair/画图兼容性清洗
+        df_raw.columns = [str(col).replace(":", "_") for col in df_raw.columns]
         
-    if df_numeric.shape[1] < 2:
-        st.error("数据列数太少 (<2)，无法进行因子分析。请检查数据是否正确。")
+        numeric_cols = []
+        for col in df_raw.columns:
+            converted = pd.to_numeric(df_raw[col], errors='coerce')
+            non_null_original = df_raw[col].notna().sum()
+            if non_null_original > 0 and converted.notna().sum() / non_null_original >= 0.5:
+                numeric_cols.append(col)
+        
+        df_num = df_raw[numeric_cols].apply(pd.to_numeric, errors='coerce').copy()
+        df_num = df_num.dropna()
+        df_num = df_num.replace([np.inf, -np.inf], np.nan).dropna()
+        df_num = df_num[~df_num.isin([np.inf, -np.inf]).any(axis=1)]
+        
+        if df_num.shape[0] >= 10 and df_num.shape[1] >= 3:
+            cleaned_measures_dict[m_name] = df_num
+
+    if not cleaned_measures_dict:
+        st.warning("⏳ 队列中无有效数据集。请通过上方选项完成数据来源配置及题目导入。")
         return
 
-    
-    # --- Feature 1: Bar Plots ---
-    st.subheader("1. 题目分布可视化 (Bar Plots)")
-    with st.expander("点击展开/折叠题目分布图", expanded=True):
-        cols_to_plot = df_numeric.columns.tolist()
-        num_cols = 2
-        rows = [st.columns(num_cols) for _ in range((len(cols_to_plot) + num_cols - 1) // num_cols)]
-        for i, col_name in enumerate(cols_to_plot):
-            row_idx = i // num_cols
-            col_idx = i % num_cols
-            with rows[row_idx][col_idx]:
-                st.markdown(f"**{col_name}**")
-                counts = df_numeric[col_name].value_counts().sort_index()
-                chart_df = pd.DataFrame({"频数": counts.values}, index=counts.index.astype(str))
-                chart_df.index.name = None
-                st.bar_chart(chart_df)
-
+    # ==========================================================================
+    # 3. 全局统一参数配置面板
+    # ==========================================================================
     st.markdown("---")
-
-    # --- Feature 2: Bootstrap EFA Pipeline ---
-    st.subheader("2. Bootstrap EFA 分析")
-    st.info("此过程将执行 Bootstrapping EFA，并进行迭代删题。")
+    st.subheader("⚙️ 批量分析全局参数设置")
     
-    st.markdown("##### ⚙️ 参数设置")
-    factor_method = st.radio(
-        "请选择因子数量 (K) 的确定方式:",
-        ["🤖 自动计算 (Bootstrap PCA)", "👆 手动指定"],
-        horizontal=True
-    )
-    
-    manual_k_val = None
-    if factor_method == "👆 手动指定":
-        max_k = max(1, df_numeric.shape[1])
-        manual_k_val = st.number_input(
-            "请输入您期望提取的因子数量:", 
-            min_value=1, 
-            max_value=max_k, 
-            value=2, 
-            step=1
+    c_p1, c_p2 = st.columns(2)
+    with c_p1:
+        factor_method = st.radio(
+            "因子数量确定方式 (全量问卷公用):",
+            ["🤖 系统自动评估 (碎石图拐点)", "👆 强制指定统一因子数"],
+            horizontal=True
         )
+    with c_p2:
+        manual_k_val = None
+        if factor_method == "👆 强制指定统一因子数":
+            manual_k_val = st.number_input("请输入期望提取的因子数量:", min_value=1, max_value=20, value=2, step=1)
 
-    st.markdown("##### 选择参与本次分析的题目")
-    st.caption("勾选要纳入本次 Bootstrap EFA 的题目；未勾选的题目将不参与本次运行。")
-    n1_items_to_run = smart_multiselect(
-        options=df_numeric.columns.tolist(),
-        label="选择题目（至少 3 个）",
-        key_suffix="n1_pre_run_items",
-        default_selected=df_numeric.columns.tolist(),
-        show_selection_controls=True,
-    )
-    df_for_run = df_numeric[[c for c in n1_items_to_run if c in df_numeric.columns]] if n1_items_to_run else df_numeric
-    if len(df_for_run.columns) < 3:
-        st.warning("⚠️ 请至少选择 3 个题目再运行。")
-    
-    run_efa = st.button("开始运行 Bootstrap EFA", type="primary")
+    # 在 Session 缓存中建立批量分析沙盒
+    if "batch_n1_results" not in st.session_state:
+        st.session_state.batch_n1_results = {}
 
-    if run_efa:
-        if len(df_for_run.columns) < 3:
-            st.error("至少需选择 3 个题目才能运行。")
-        else:
-            if 'n1_result_df' in st.session_state:
-                del st.session_state['n1_result_df']
+    st.markdown(f"**📋 待分析问卷任务队列 (共 {len(cleaned_measures_dict)} 个):**")
+    for m_name, df_ready in cleaned_measures_dict.items():
+        st.caption(f" └─ `维度名: {m_name}` ── 样本行数: `{df_ready.shape[0]}` | 初始题目数: `{df_ready.shape[1]}`")
+
+    # ==========================================================================
+    # 4. 执行批量全自动管道循环
+    # ==========================================================================
+    if st.button("🚀 开始运行所有选定 Measure 的自动化批量 EFA", type="primary", use_container_width=True):
+        batch_results = {}
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
+        for idx, (m_name, df_ready) in enumerate(cleaned_measures_dict.items()):
+            status_text.markdown(f"⏳ **正在计算 ({idx+1}/{len(cleaned_measures_dict)}):** 正在执行问卷维度 `[{m_name}]` 的迭代删题...")
             
-            with st.container():
-                final_df, final_loadings, kept, deleted, n_factors = run_pipeline_streamlit(
-                    df_for_run,
-                    fixed_factors=manual_k_val, whitelist=None
-                )
-                
-                st.session_state.n1_result_df = final_df
-                st.session_state.n1_loadings = final_loadings
-                st.session_state.n1_kept = kept
-                st.session_state.n1_deleted = deleted
-                st.session_state.n1_factors = n_factors
-                st.session_state.n1_df_for_run_columns = list(df_for_run.columns)
-                
-                st.success("🎉 EFA 分析完成！")
-
-    # --- Feature 3: Post-Analysis Checks ---
-    if 'n1_result_df' in st.session_state:
-        st.markdown("---")
-        st.subheader("3. 最终模型检验与报告")
-        
-        # 获取最终用于分析的数据
-        df_final = st.session_state.n1_result_df
-        loadings = st.session_state.n1_loadings
-        
-        # 3.0 展示保留/删除题目概况
-        with st.expander("查看题目保留/删除详情", expanded=False):
-            c1, c2 = st.columns(2)
-            c1.write(f"**保留的题目 ({len(st.session_state.n1_kept)})**")
-            c1.write(st.session_state.n1_kept)
-            c2.write(f"**删除的题目 ({len(st.session_state.n1_deleted)})**")
-            c2.write(st.session_state.n1_deleted)
-
-        # =========================================================
-        # 1) KMO & Bartlett’s test (依据 statsCriteriaCheck.py)
-        # =========================================================
-        st.markdown("#### 1️⃣ KMO & Bartlett’s Test")
-        
-        try:
-            # 确保无缺失值
-            df_clean = df_final.dropna()
-            kmo_all, kmo_model = calculate_kmo(df_clean)
-            chi_square_value, p_value = calculate_bartlett_sphericity(df_clean)
-            
-            summary_df = pd.DataFrame({
-                "Statistic": ["Kaiser-Meyer-Olkin (KMO > 0.6)", "Bartlett’s chi-square", "Bartlett’s p-value"],
-                "Value": [f"{kmo_model:.4f}", f"{chi_square_value:.4f}", f"{p_value:.4f}"]
-            })
-            
-            # 使用 table 展示更整洁
-            st.table(summary_df)
-            
-            if kmo_model < 0.6:
-                st.warning("⚠️ KMO 值较低 (< 0.6)，数据可能不太适合进行因子分析。")
-            if p_value > 0.05:
-                st.warning("⚠️ Bartlett 球形检验未显著 (p > 0.05)，变量间可能缺乏相关性。")
-
-        except Exception as e:
-            st.error(f"计算 KMO/Bartlett 出错: {e}")
-
-        # =========================================================
-        # 2) Internal Consistency (Cronbach's Alpha)
-        # =========================================================
-        st.markdown("#### 2️⃣ 信度检验 (Internal Consistency)")
-        
-        try:
-            current_alpha = cronbach_alpha(df_final)
-            st.markdown(f"**👉 所有题项的 Cronbach's α = `{current_alpha:.4f}`**")
-            
-            if current_alpha < 0.6:
-                st.error("❌ 信度不可接受 (< 0.6)")
-            elif current_alpha < 0.7:
-                st.warning("⚠️ 信度一般 (0.6 - 0.7)")
-            else:
-                st.success("✅ 信度良好 (> 0.7)")
-
-            st.markdown("**📉 删除特定题项后的 α 变化 (Alpha if item deleted):**")
-            st.caption("如果删除某题后 α 值显著升高，说明该题可能降低了量表的内部一致性。")
-            
-            removal_df = alpha_after_removal(df_final)
-
-            # 按照题目序号排序
-            removal_df_sorted = sort_dataframe_by_item_names(removal_df, item_column='删除的题项')
-
-            # 使用 Pandas Styler 进行渐变色背景显示
-            st.dataframe(
-                removal_df_sorted.style
-                .format({"Cronbach's α": "{:.4f}"})
-                .background_gradient(cmap='RdYlGn', subset=["Cronbach's α"])
-            )
-
-        except Exception as e:
-            st.error(f"计算信度时出错: {e}")
-
-        # =========================================================
-        # 3) Item Analysis & Correlations (New Feature)
-        # =========================================================
-        st.markdown("#### 3️⃣ 题目关联性分析 (Item Relationships)")
-        
-        t1, t2 = st.tabs(["Item-Total Correlation", "Pairwise Correlation Matrix"])
-        
-        with t1:
-            st.caption("校正项总相关 (Corrected Item-Total Correlation): 单个题目与剩余题目总分的相关性。通常建议 > 0.3。")
             try:
-                itc_df = calculate_item_total_correlation(df_final)
-                # 按照题目序号排序
-                itc_df_sorted = sort_dataframe_by_item_names(itc_df, item_column='Item')
-                st.dataframe(
-                    itc_df_sorted.style
-                    .format("{:.4f}")
-                    .background_gradient(cmap="RdYlGn", vmin=0, vmax=1)
-                )
+                # 借助原有的主管道函数进行静默删题计算
+                # 利用 st.container 捕获删题历史并在后面进行独立沙盒隔离展示
+                with st.expander(f"⚙️ 查看 [{m_name}] 迭代实时删题细节 (后台日志)", expanded=False):
+                    final_df, final_loadings, kept, deleted, n_factors = run_pipeline_streamlit(
+                        df_ready,
+                        fixed_factors=manual_k_val,
+                        whitelist=None
+                    )
+                
+                batch_results[m_name] = {
+                    "success": True,
+                    "final_df": final_df,
+                    "final_loadings": final_loadings,
+                    "kept": kept,
+                    "deleted": deleted,
+                    "n_factors": n_factors,
+                    "df_ready_columns": list(df_ready.columns)
+                }
             except Exception as e:
-                st.error(f"Error calculating Item-Total Corr: {e}")
-                
-        with t2:
-            st.caption("题目间的两两相关系数矩阵 (Pearson Correlation)。")
-            with st.expander("点击展开相关系数矩阵", expanded=False):
-                corr_matrix = df_final.corr()
-                # 按照题目序号排序行和列
-                sorted_columns = sort_items_by_number(corr_matrix.columns.tolist())
-                corr_matrix_sorted = corr_matrix.loc[sorted_columns, sorted_columns]
-                st.dataframe(
-                    corr_matrix_sorted.style
-                    .format("{:.2f}")
-                    .background_gradient(cmap="coolwarm", vmin=-1, vmax=1)
-                )
-
-
-
-        # =========================================================
-        # 4) Model Fit & Residuals (New Feature + Communalities)
-        # =========================================================
-        st.markdown("#### 4️⃣ 模型拟合与残差 (Model Fit & Residuals)")
-        
-        # --- Communalities (Moved here) ---
-        st.write("**共同度 (Communalities)**")
-        try:
-            communalities = (loadings ** 2).sum(axis=1)
-            comm_df = pd.DataFrame({'Communality': communalities})
-            # 按照题目序号排序
-            comm_df_sorted = sort_dataframe_by_item_names(comm_df)
-            st.dataframe(comm_df_sorted.style.format('{:.4f}').background_gradient(cmap="Blues"))
-        except Exception as e:
-            st.error(f"Error calculating communalities: {e}")
-
-        # --- Residual Normality (New) ---
-        st.write("**残差正态性检验 (Residual Normality)**")
-        st.caption("检验观察到的相关矩阵与模型重构的相关矩阵之间的差异（残差）是否符合正态分布。")
-        
-        try:
-            res_matrix, res_values, shapiro_stat, shapiro_p = check_residual_normality(df_final, loadings)
+                batch_results[m_name] = {
+                    "success": False,
+                    "error_msg": str(e)
+                }
             
-            c1, c2 = st.columns(2)
-            c1.metric("Shapiro-Wilk Statistic", f"{shapiro_stat:.4f}")
-            c2.metric("P-Value", f"{shapiro_p:.4f}")
+            progress_bar.progress((idx + 1) / len(cleaned_measures_dict))
             
-            if shapiro_p > 0.05:
-                st.success("✅ 残差服从正态分布 (p > 0.05)，模型拟合良好。")
-            else:
-                st.warning("⚠️ 残差不服从正态分布 (p < 0.05)，模型拟合可能存在偏差。")
-            
-            with st.expander("查看残差直方图"):
-                fig, ax = plt.subplots(figsize=(6, 4))
-                ax.hist(res_values, bins=15, edgecolor='black', alpha=0.7)
-                ax.set_title("Histogram of Residuals (Off-diagonal)")
-                ax.set_xlabel("Residual Value")
-                ax.set_ylabel("Frequency")
-                st.pyplot(fig)
-                
-        except Exception as e:
-            st.error(f"Error checking residuals: {e}")
+        status_text.success("🎉 所有问卷维度的自动化批量分析与迭代删题全部完成！请在下方控制台审阅结果。")
+        st.session_state.batch_n1_results = batch_results
 
-        '''
-        
-        # =========================================================
-        # 3) Communalities (共同度)--原来的code
-        st.markdown("#### 3️⃣ 共同度 (Communalities)")
-        st.caption("表示每个题目被提取出的因子所解释的方差比例。")
-        
-        try:
-            # 计算 communalities = loadings的平方和
-            communalities = (loadings ** 2).sum(axis=1)
-            
-            comm_df = pd.DataFrame({
-                'Item': loadings.index,
-                'Communality': communalities
-            })
-            
-            st.dataframe(
-                comm_df.style
-                .format({'Communality': '{:.4f}'})
-                .background_gradient(cmap="Blues")
-            )
-        except Exception as e:
-            st.error(f"计算共同度出错: {e}")
-        '''
-       
-
-        # 🚀 结果微调：恢复被删题目
-        if len(st.session_state.n1_deleted) > 0:
-            st.markdown("---")
-            st.markdown("#### 🛠️ 结果微调：恢复被删题目")
-            st.caption("如果你认为某些被删的题目具有重要的理论意义，可以将它们选中并强制保留。")
-            
-            items_to_restore = st.multiselect(
-                "请选择要【强制保留】的题目:",
-                options=st.session_state.n1_deleted
-            )
-            
-            if st.button("🔄 恢复选中题目并重新运行 EFA", type="secondary"):
-                if items_to_restore:
-                    with st.spinner(f"正在强制保留 {len(items_to_restore)} 个题目并重新运行..."):
-                        if 'n1_result_df' in st.session_state:
-                            del st.session_state['n1_result_df']
-                            
-                        current_k = st.session_state.n1_factors
-                        run_cols = st.session_state.get("n1_df_for_run_columns", df_numeric.columns.tolist())
-                        run_cols = [c for c in run_cols if c in df_numeric.columns]
-                        df_input = df_numeric[run_cols] if run_cols else df_numeric
-
-                        final_df, final_loadings, kept, deleted, n_factors = run_pipeline_streamlit(
-                            df_input,
-                            fixed_factors=current_k,
-                            whitelist=items_to_restore
-                        )
-                        
-                        st.session_state.n1_result_df = final_df
-                        st.session_state.n1_loadings = final_loadings
-                        st.session_state.n1_kept = kept
-                        st.session_state.n1_deleted = deleted
-                        st.session_state.n1_factors = n_factors
-                        
-                        st.rerun()
-                else:
-                    st.warning("请至少选择一个要恢复的题目。")
-
-        # =========================================================
-        # 5) 最终载荷矩阵 (含排序、着色、导出)
-        # =========================================================
-        loadings = st.session_state.n1_loadings
-        st.markdown("#### 5️⃣ 最终因子载荷矩阵 (Factor Loadings)")
-        
-        # 1. 排序: 按照题目序号从小到大排序
-        loadings_sorted = sort_dataframe_by_item_names(loadings)
-
-        # 2. 颜色编码函数
-        def color_loadings(val):
-            """
-            大于 0.4 或 小于 -0.4 显示蓝色加粗，否则无色
-            """
-            try:
-                is_strong = abs(float(val)) > 0.40
-            except (TypeError, ValueError):
-                return ''
-            color = 'blue' if is_strong else 'black'
-            weight = 'bold' if is_strong else 'normal'
-            return f'color: {color}; font-weight: {weight}'
-
-        # 3. 展示 Style 后的表格
-        st.dataframe(
-            loadings_sorted.style
-            .format("{:.3f}")
-            .map(color_loadings)
-        )
-
-        csv = loadings_sorted.to_csv().encode('utf-8-sig')
-        st.download_button(
-            label="📥 下载最终载荷矩阵 (CSV)",
-            data=csv,
-            file_name='final_factor_loadings.csv',
-            mime='text/csv',
-        )
-
-        # =========================================================
-        # 生成可下载 Excel 报告表（每 measure 一 sheet，按题目序号排序）
-        # =========================================================
+    # ==========================================================================
+    # 5. 集中化多 Tab 面板呈现与用户单项微调、确认
+    # ==========================================================================
+    if st.session_state.batch_n1_results:
         st.markdown("---")
-        st.markdown("#### 📥 生成可下载 Excel 报告表")
-        st.caption("根据当前 EFA 结果生成按题目排列的报告表，可填写量表编号(measure_id)后下载。")
-        kept = st.session_state.n1_kept
-        df_final = st.session_state.n1_result_df
-        dc_measures = st.session_state.get("dc_measures") or {}
-        selected_measures = st.session_state.get("n1_selected_measures") or []
+        st.subheader("📥 批量结果确认与指标综合审查面板")
+        st.info("💡 切换下方的问卷标签页（Tabs），可以无干扰地独立审查并导出每个 Measure 问卷对应的删题结果、载荷矩阵及信效度报告。")
 
-        # 确定要生成报告的“量表”及其题目：四数据集下按 measure 分，否则整表为一个量表
-        measure_item_list = []
-        if dc_measures and selected_measures:
-            for m in selected_measures:
-                items_m = [c for c in (dc_measures.get(m) or []) if c in kept]
-                if items_m:
-                    measure_item_list.append((m, items_m))
-        if not measure_item_list:
-            measure_item_list = [("当前量表", list(kept))]
+        active_tab_names = list(st.session_state.batch_n1_results.keys())
+        tabs = st.tabs(active_tab_names)
 
-        with st.form("n1_excel_report_form"):
-            measure_ids = {}
-            for m, items_m in measure_item_list:
-                measure_ids[m] = st.text_input(
-                    f"量表「{m}」的 measure_id（唯一编码）",
-                    value="",
-                    key=f"n1_measure_id_{m}",
-                    help="用于报告中标识该量表的唯一编号，如问卷缩写。"
-                )
-            submitted = st.form_submit_button("生成并下载 Excel 报告表")
-            if submitted:
-                missing = [m for m, _ in measure_item_list if not (measure_ids.get(m) or "").strip()]
-                if missing:
-                    st.error(f"请为以下量表填写 measure_id：{', '.join(missing)}")
-                    st.session_state.pop("n1_excel_report_bytes", None)
-                else:
-                    try:
-                        kmo_all, kmo_model = calculate_kmo(df_final)
-                        chi_square_value, p_value = calculate_bartlett_sphericity(df_final)
-                        alpha_removal_df = alpha_after_removal(df_final)
-                        itc_df = calculate_item_total_correlation(df_final)
-                        communalities = (loadings ** 2).sum(axis=1)
-                        _, _, shapiro_stat, shapiro_p = check_residual_normality(df_final, loadings)
-                        alpha_removal_by_item = alpha_removal_df.set_index("删除的题项")["Cronbach's α"]
-
-                        buf = io.BytesIO()
-                        with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
-                            for m, items_m in measure_item_list:
-                                mid = (measure_ids.get(m) or m).strip()
-                                sorted_items = sort_item_cols_by_number(items_m)
-                                rows = []
-
-                                def _item_number_from_item_text(item_text_val):
-                                    """
-                                    item_number 直接取自 item_text 的前缀序号：
-                                    - 先取 item_text 在第一个下划线前的前缀
-                                    - 再从该前缀提取数字序号
-                                    """
-                                    s = str(item_text_val).strip()
-                                    prefix = s.split("_", 1)[0]
-                                    m = re.search(r"(\d+)", prefix)
-                                    return int(m.group(1)) if m else ""
-
-                                for item in sorted_items:
-                                    pre, num, text = parse_item_col(item)
-                                    item_txt = text or item
-                                    item_num = _item_number_from_item_text(item_txt)
-                                    rev = 1 if (isinstance(item, str) and item.rstrip().endswith("r")) else 0
-                                    load_row = loadings.loc[item] if item in loadings.index else pd.Series(dtype=float)
-                                    alpha_rem = alpha_removal_by_item.get(item, np.nan)
-                                    itc_val = itc_df.loc[item, "Item-Total Corr"] if item in itc_df.index else np.nan
-                                    comm = communalities.get(item, np.nan)
-                                    row = {
-                                        "measure_id": mid,
-                                        "item_number": item_num,
-                                        "item_text": item_txt,
-                                        "reverse": rev,
-                                    }
-                                    for c in loadings.columns:
-                                        row[c] = load_row.get(c, np.nan)
-                                    row["KMO"] = kmo_model
-                                    row["Bartlett_chi2"] = chi_square_value
-                                    row["Bartlett_p"] = p_value
-                                    row["alpha_after_removal"] = alpha_rem
-                                    row["item_total_correlation"] = itc_val
-                                    row["communality"] = comm
-                                    row["residual_Shapiro_W_stat"] = shapiro_stat
-                                    row["residual_Shapiro_W_p"] = shapiro_p
-                                    rows.append(row)
-                                sheet_df = pd.DataFrame(rows)
-                                sheet_name = (mid[:31]) if len(mid) > 31 else mid or "Sheet"
-                                sheet_name = "".join(c for c in sheet_name if c not in '[]:*?/\\')
-                                sheet_df.to_excel(w, sheet_name=sheet_name or "Sheet", index=False)
-                        buf.seek(0)
-                        st.session_state.n1_excel_report_bytes = buf.getvalue()
-                        # 存储 measure_ids 用于下载文件名
-                        mids_used = [(measure_ids.get(m) or m).strip() for m, _ in measure_item_list]
-                        st.session_state.n1_excel_report_measure_ids = mids_used
-                        st.success("已生成报告表，请点击下方按钮下载。")
-                    except Exception as e:
-                        st.error(f"生成报告表时出错: {e}")
-                        import traceback
-                        st.code(traceback.format_exc())
-
-        if st.session_state.get("n1_excel_report_bytes"):
-            mids = st.session_state.get("n1_excel_report_measure_ids") or ["measure"]
-            safe_mid = re.sub(r'[\\/:*?"<>|]+', '_', "-".join(str(m).strip() for m in mids)).strip(" .") or "measure"
-            user_name = st.session_state.get("user_name", "unknown_user")
-            safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
-            today = date.today().strftime("%Y-%m-%d")
-            file_name = f"{safe_mid}_efa_report_{today}_{safe_user}.xlsx"
-            st.download_button(
-                "⬇️ 下载 Excel 报告表",
-                data=st.session_state.n1_excel_report_bytes,
-                file_name=file_name,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="n1_download_excel_report",
-            )
-
-        '''
-        # =========================================================
-        # 🆕 新增功能: 保存结构并跳转 CFA
-        # =========================================================
-        st.markdown("---")
-        st.markdown("### 🚀 下一步: 验证性因子分析 (CFA)")
-        
-        col_next_1, col_next_2 = st.columns([2, 1])
-        
-        with col_next_1:
-            st.info("点击下方按钮，将当前的 EFA 因子结构（题目归属）保存，并自动跳转到 N2 模块进行验证。")
+        for i, m_name in enumerate(active_tab_names):
+            res = st.session_state.batch_n1_results[m_name]
             
-            # 提取因子结构: 找出每个因子中载荷 > 0.4 的题目
-            def extract_efa_structure(load_df, threshold=0.4):
-                structure = {}
-                for factor_col in load_df.columns:
-                    # 筛选该因子下绝对值大于阈值的题目
-                    items = load_df.index[load_df[factor_col].abs() > threshold].tolist()
-                    structure[factor_col] = items
-                return structure
+            with tabs[i]:
+                st.markdown(f"### 📋 维度: {m_name}")
+                if not res["success"]:
+                    st.error(f"❌ 问卷分析由于数学边界或奇异矩阵崩溃，核心错误原因: {res['error_msg']}")
+                    continue
 
-            if st.button("💾 保存结构并跳转至 N2 CFA 模块 ->", type="primary"):
-                # 1. 提取结构
-                efa_structure = extract_efa_structure(loadings_sorted)
-                st.session_state.efa_suggested_structure = efa_structure
-                st.session_state.efa_source_data = df_final # 同时把清洗好的数据带过去
-                
-                # 2. 跳转导航
-                # 定义回调函数改状态 (避免直接改报错)
-                st.session_state.nav_selection = "3. N2 CFA数据分析"
-                st.rerun()
-    '''
-    # --- Feature 3: Post-Analysis Checks ---
-    '''
-    
-    if 'n1_result_df' in st.session_state:
-        st.markdown("---")
-        st.subheader("3. 最终模型检验 (KMO, Bartlett & Reliability)")
-        
-        res_df = st.session_state.n1_result_df
-        loadings = st.session_state.n1_loadings
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write(f"**保留的题目 ({len(st.session_state.n1_kept)})**")
-            st.write(st.session_state.n1_kept)
-        with col2:
-            st.write(f"**删除的题目 ({len(st.session_state.n1_deleted)})**")
-            st.write(st.session_state.n1_deleted)
+                # 局部沙盒数据解包
+                df_final = res["final_df"]
+                loadings = res["final_loadings"]
+                kept = res["kept"]
+                deleted = res["deleted"]
+                n_factors = res["n_factors"]
 
-            # 手动恢复题目 (结果微调)
-            # ========================================================
-            if len(st.session_state.n1_deleted) > 0:
-                st.markdown("---")
-                st.markdown("#### 🛠️ 结果手动调整：恢复被删题目")
-                st.caption("如果你认为某些被删的题目具有重要的理论意义，可以将它们选中并强制保留。")
-                
-                # 1. 多选框：从已删除的列表中选择
-                items_to_restore = st.multiselect(
-                    "请选择要【强制保留】的题目:",
-                    options=st.session_state.n1_deleted
-                )
-                
-                # 2. 重新运行按钮
-                if st.button("🔄 恢复选中题目并重新运行 EFA", type="secondary"):
-                    if items_to_restore:
-                        with st.spinner(f"正在强制保留 {len(items_to_restore)} 个题目并重新运行..."):
-                            # 清除旧结果
-                            if 'n1_result_df' in st.session_state:
-                                del st.session_state['n1_result_df']
-                                
-                            # 重新运行管道，传入 whitelist
-                            # 注意：这里需要获取 manual_k_val，虽然它在上面的作用域，但在 streamlit 中通常可以获取到
-                            # 为了保险，我们重新判断一下 k 的获取逻辑，或者直接复用 session_state 里的 k
-                            # 但最简单的方法是复用上面的 df_numeric 和 manual_k_val
-                            
-                            k_arg = st.session_state.get('n1_factors', None)
-                            run_cols = st.session_state.get("n1_df_for_run_columns", df_numeric.columns.tolist())
-                            run_cols = [c for c in run_cols if c in df_numeric.columns]
-                            df_input = df_numeric[run_cols] if run_cols else df_numeric
-
-                            # 再次调用核心函数
-                            final_df, final_loadings, kept, deleted, n_factors = run_pipeline_streamlit(
-                                df_input,
-                                fixed_factors=manual_k_val,
-                                whitelist=items_to_restore
-                            )
-                            
-                            # 更新 Session State
-                            st.session_state.n1_result_df = final_df
-                            st.session_state.n1_loadings = final_loadings
-                            st.session_state.n1_kept = kept
-                            st.session_state.n1_deleted = deleted
-                            st.session_state.n1_factors = n_factors
-                            
-                            st.rerun() # 强制刷新页面显示新结果
+                # 5.1 题目变动报告单
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.success(f"✅ **最终保留题目数 ({len(kept)} 题):**")
+                    st.caption(", ".join(kept))
+                with c2:
+                    if deleted:
+                        st.warning(f"🛑 **迭代已删除题目 ({len(deleted)} 题):**")
+                        st.caption(", ".join(deleted))
                     else:
-                        st.warning("请至少选择一个要恢复的题目。")
+                        st.info("💯 结构稳定：当前问卷无题目被剔除。")
 
+                # 5.2 KMO 与 结构效度
+                st.markdown("#### 1️⃣ KMO & Bartlett 球形检验")
+                try:
+                    kmo_all, kmo_model = calculate_kmo(df_final)
+                    chi_square_value, p_value = calculate_bartlett_sphericity(df_final)
+                    
+                    summary_df = pd.DataFrame({
+                        "统计指标检验名称": ["Kaiser-Meyer-Olkin (KMO)", "Bartlett 球形度卡方值", "Bartlett 显著性 (P-value)"],
+                        "输出值": [f"{kmo_model:.4f}", f"{chi_square_value:.4f}", f"{p_value:.4e}"]
+                    })
+                    st.table(summary_df)
+                except Exception as e:
+                    st.error(f"效度指标计算受限: {e}")
 
+                # 5.3 内部一致性信度
+                st.markdown("#### 2️⃣ 信度检验 (Reliability Analysis)")
+                try:
+                    current_alpha = cronbach_alpha(df_final)
+                    st.markdown(f"**👉 量表整体内部一致性 Cronbach's α = `{current_alpha:.4f}`**")
+                    
+                    with st.expander("查看删题后的信度变化 (Alpha if item deleted)"):
+                        removal_df = alpha_after_removal(df_final)
+                        removal_df_sorted = sort_dataframe_by_item_names(removal_df, item_column='删除的题项')
+                        st.dataframe(removal_df_sorted.style.format({"Cronbach's α": "{:.4f}"}).background_gradient(cmap='RdYlGn', subset=["Cronbach's α"]))
+                except Exception as e:
+                    st.error(f"信度指标计算受限: {e}")
+
+                # 5.4 最终对齐与着色的载荷矩阵
+                st.markdown("#### 3️⃣ 最终因子载荷矩阵 (Factor Loadings)")
+                loadings_sorted = sort_dataframe_by_item_names(loadings)
+
+                def color_loadings(val):
+                    try:
+                        is_strong = abs(float(val)) > 0.40
+                    except (TypeError, ValueError):
+                        return ''
+                    color = 'blue' if is_strong else 'black'
+                    weight = 'bold' if is_strong else 'normal'
+                    return f'color: {color}; font-weight: {weight}'
+
+                st.dataframe(loadings_sorted.style.format("{:.3f}").map(color_loadings))
+
+                # 5.5 单一量表独立恢复与微调
+                if len(deleted) > 0:
+                    st.markdown("#### 🛠️ 独立微调控制台")
+                    items_to_restore = st.multiselect(
+                        f"从 [{m_name}] 的已删列表中选择【强制恢复】的题目:",
+                        options=deleted,
+                        key=f"restore_select_{m_name}"
+                    )
+                    if st.button(f"🔄 仅为 [{m_name}] 恢复题项并重算 EFA", key=f"btn_restore_{m_name}"):
+                        if items_to_restore:
+                            df_input_raw = cleaned_measures_dict[m_name]
+                            with st.spinner("正在单独微调该维度..."):
+                                f_df, f_load, k_list, d_list, f_k = run_pipeline_streamlit(
+                                    df_input_raw,
+                                    fixed_factors=n_factors,
+                                    whitelist=items_to_restore
+                                )
+                                # 写回缓存
+                                st.session_state.batch_n1_results[m_name] = {
+                                    "success": True,
+                                    "final_df": f_df,
+                                    "final_loadings": f_load,
+                                    "kept": k_list,
+                                    "deleted": d_list,
+                                    "n_factors": f_k,
+                                    "df_ready_columns": list(df_ready.columns)
+                                }
+                                st.rerun()
+
+                # 5.6 单维度问卷结果最终确认勾选
+                st.checkbox(f"💾 确认并批准 【{m_name}】 的数据结论与删题结构", key=f"confirm_check_{m_name}")
+
+        # ==========================================================================
+        # 6. 一键打包生成多工作表(Multi-Sheet) Excel 综合报告导出
+        # ==========================================================================
+        st.markdown("---")
+        st.markdown("### 📥 一键批量导出多 Sheet Excel 汇总报告")
+        st.caption("系统将把所有分析成功的 Measure 数据自动写入同一个 Excel 文件的不同 Sheet 页中，并按题目序号自动重排序输出。")
         
-        st.markdown("#### 最终因子载荷矩阵 (Factor Loadings)")
-        # 按照题目序号排序
-        loadings_sorted_final = sort_dataframe_by_item_names(loadings)
-        st.dataframe(loadings_sorted_final.style.background_gradient(cmap="Blues").format("{:.3f}"))
-
-        st.markdown("#### 效度检验")
-        try:
-            kmo_all, kmo_model = calculate_kmo(res_df)
-            chi_square_value, p_value = calculate_bartlett_sphericity(res_df)
+        with st.form("batch_excel_report_form"):
+            measure_ids = {}
+            for m_name in active_tab_names:
+                if st.session_state.batch_n1_results[m_name]["success"]:
+                    measure_ids[m_name] = st.text_input(
+                        f"量表「{m_name}」的 measure_id (非空编码，如英文缩写)",
+                        value=m_name[:10],
+                        key=f"batch_mid_{m_name}"
+                    )
             
-            k1, k2, k3 = st.columns(3)
-            k1.metric("KMO (总体)", f"{kmo_model:.3f}")
-            k2.metric("Bartlett 卡方", f"{chi_square_value:.2f}")
-            k3.metric("Bartlett P值", f"{p_value:.3e}")
-            
-            if kmo_model > 0.6 and p_value < 0.05:
-                st.success("✅ 数据通过 KMO (>0.6) 和 Bartlett 球形检验 (p<0.05)。")
-            else:
-                st.error("❌ 数据可能不适合做因子分析。")
-        except Exception as e:
-            st.error(f"计算 KMO/Bartlett 时出错: {e}")
+            submitted = st.form_submit_button("⚡ 编译并打包批量数据报告")
+            if submitted:
+                try:
+                    buf = io.BytesIO()
+                    with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
+                        for m_name in active_tab_names:
+                            res_m = st.session_state.batch_n1_results[m_name]
+                            if not res_m["success"]:
+                                continue
+                                
+                            mid = (measure_ids.get(m_name) or m_name).strip()
+                            df_f = res_m["final_df"]
+                            loads = res_m["final_loadings"]
+                            kept_m = res_m["kept"]
+                            
+                            # 指标计算
+                            k_all, k_mod = calculate_kmo(df_f)
+                            chi_v, p_v = calculate_bartlett_sphericity(df_f)
+                            alpha_rem_df = alpha_after_removal(df_f)
+                            alpha_lookup = alpha_rem_df.set_index("删除的题项")["Cronbach's α"]
+                            itc_df = calculate_item_total_correlation(df_f)
+                            communalities = (loads ** 2).sum(axis=1)
+                            _, _, s_stat, s_p = check_residual_normality(df_f, loads)
+                            
+                            sorted_items = sort_item_cols_by_number(kept_m)
+                            rows = []
+                            
+                            for item in sorted_items:
+                                pre, num, text = parse_item_col(item)
+                                item_txt = text or item
+                                rev = 1 if (isinstance(item, str) and item.rstrip().endswith("r")) else 0
+                                load_row = loads.loc[item] if item in loads.index else pd.Series(dtype=float)
+                                
+                                # 从题名中智能抽取序号
+                                prefix = str(item_txt).strip().split("_", 1)[0]
+                                m_match = re.search(r"(\d+)", prefix)
+                                item_num = int(m_match.group(1)) if m_match else ""
+                                
+                                row = {
+                                    "measure_id": mid,
+                                    "item_number": item_num,
+                                    "item_text": item_txt,
+                                    "reverse": rev,
+                                }
+                                for c in loads.columns:
+                                    row[c] = load_row.get(c, np.nan)
+                                row["KMO"] = k_mod
+                                row["Bartlett_chi2"] = chi_v
+                                row["Bartlett_p"] = p_v
+                                row["alpha_after_removal"] = alpha_lookup.get(item, np.nan)
+                                row["item_total_correlation"] = itc_df.loc[item, "Item-Total Corr"] if item in itc_df.index else np.nan
+                                row["communality"] = communalities.get(item, np.nan)
+                                row["residual_Shapiro_W_stat"] = s_stat
+                                row["residual_Shapiro_W_p"] = s_p
+                                rows.append(row)
+                                
+                            sheet_df = pd.DataFrame(rows)
+                            s_name = "".join(c for c in mid[:30] if c not in '[]:*?/\\')
+                            sheet_df.to_excel(w, sheet_name=s_name or "Sheet", index=False)
+                            
+                    buf.seek(0)
+                    st.session_state.batch_excel_bytes = buf.getvalue()
+                    st.success("✨ 多 Sheet 批量综合报告编译成功！点击下方按钮即可一键全量保存。")
+                except Exception as e:
+                    st.error(f"编译批量报告时遇到硬伤: {e}")
 
-        st.markdown("#### 信度检验 (Internal Consistency)")
-        try:
-            alpha = cronbach_alpha(res_df)
-            st.metric("Cronbach's Alpha", f"{alpha:.3f}")
-            if alpha > 0.7:
-                st.success("✅ 信度良好 (>0.7)")
-            elif alpha > 0.6:
-                st.warning("⚠️ 信度一般 (0.6 - 0.7)")
-            else:
-                st.error("❌ 信度不可接受 (<0.6)")
-        except Exception as e:
-            st.error(f"计算 Alpha 时出错: {e}")
-    '''
-    
+        if st.session_state.get("batch_excel_bytes"):
+            user_name = st.session_state.get("user_name", "batch_user")
+            today = date.today().strftime("%Y-%m-%d")
+            st.download_button(
+                "⬇️ 下载批量自动化多工作表 Excel 报告",
+                data=st.session_state.batch_excel_bytes,
+                file_name=f"batch_efa_summary_report_{today}_{user_name}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
