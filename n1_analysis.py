@@ -507,7 +507,7 @@ def check_residual_normality(df, loadings):
 # ==============================================================================
 
 def render_n1_analysis():
-    st.title("模块 2: EFA数据分析 ")
+    st.title("模块 2: N1数据分析 ")
 
     # --- 1. 数据来源 ---
     st.sidebar.markdown("### 数据来源设置")
