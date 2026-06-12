@@ -8,13 +8,13 @@ def main():
     st.sidebar.title("导航")
 
     if "page" not in st.session_state:
-    st.session_state.page = "数据清洗"
-    
-    page = st.sidebar.radio(
-        "选择模块",
-        ["数据清洗", "N1分析"],
-        key="page"
-    )
+        st.session_state.page = "数据清洗"
+        
+        page = st.sidebar.radio(
+            "选择模块",
+            ["数据清洗", "N1分析"],
+            key="page"
+        )
     
         if st.session_state.page == "数据清洗":
             render_data_cleaning()
