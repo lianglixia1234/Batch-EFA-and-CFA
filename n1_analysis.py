@@ -598,65 +598,64 @@ def render_n1_analysis():
         if not dataset_names:
             st.warning("暂无已保存的子数据集，请先前往数据清洗页面保存。")
         else:
-            selected_name = st.selectbox("1. 请选择已保存的子数据集:", dataset_names)
-            if selected_name:
-                df_sub = st.session_state.sub_datasets[selected_name]
-                
-                # ==============================================================
-                # 🎯 【强力无损打捞】不依赖数字 i，全量扫描内存中所有匹配的 Measure 存储
-                # ==============================================================
+            # ==============================================================
+            # 🚨 【核心改造】将 st.selectbox 升级为 st.multiselect，支持多选子数据集！
+            # ==============================================================
+            selected_names = st.multiselect(
+                "1. 请选择要批量运行的已保存子数据集（可多选）:", 
+                options=dataset_names,
+                default=dataset_names, # 默认全选，极大地提高效率
+                key="n1_batch_sub_datasets"
+            )
+            
+            if selected_names:
+                # 建立一个临时存储，用来汇总所有选中的数据集里捞出来的 Measure
                 saved_measures_found = {}
                 
-                # 策略 1：直接扫描 Session_state 里所有以 'dc_measure_cols_' 开头的清洗记录
-                for key in list(st.session_state.keys()):
-                    if key.startswith("dc_measure_cols_"):
-                        # 逆向解析出真正的 Measure 名字
-                        # 格式通常是: dc_measure_cols_{m_name}_{i}
-                        parts = key.split("_")
-                        if len(parts) >= 4:
-                            # 拼接中间可能带下划线的量表名，去掉前缀和最后的数字索引
-                            m_name = "_".join(parts[3:-1]) 
-                            items_in_measure = st.session_state[key]
-                            
-                            if items_in_measure and isinstance(items_in_measure, list):
-                                # 验证这些题在当前的子数据集中确实存在
-                                valid_cols = [c for c in items_in_measure if c in df_sub.columns]
-                                if len(valid_cols) >= 3:
-                                    saved_measures_found[m_name] = valid_cols
-
-                # 策略 2：如果策略 1 没抓到，用双文件模式的 dc_measures 缓存做第二重保险
-                if not saved_measures_found:
-                    global_measures = st.session_state.get("dc_measures", {})
-                    if global_measures:
-                        for m, cols in global_measures.items():
-                            valid_cols = [c for c in cols if c in df_sub.columns]
-                            if len(valid_cols) >= 3:
-                                saved_measures_found[m] = valid_cols
+                # 第一层循环：遍历用户选中的每一个子数据集
+                for current_dataset_name in selected_names:
+                    df_sub = st.session_state.sub_datasets[current_dataset_name]
+                    
+                    # 策略 1：全量扫描内存中所有匹配的 Measure 题目映射关系
+                    for key in list(st.session_state.keys()):
+                        if key.startswith("dc_measure_cols_"):
+                            parts = key.split("_")
+                            if len(parts) >= 4:
+                                m_name = "_".join(parts[3:-1]) 
+                                items_in_measure = st.session_state[key]
+                                
+                                if items_in_measure and isinstance(items_in_measure, list):
+                                    # 验证这些题在当前这个子数据集中是否存在
+                                    valid_cols = [c for c in items_in_measure if c in df_sub.columns]
+                                    if len(valid_cols) >= 3:
+                                        # 为了防止多个数据集里有同名 Measure 导致覆盖，
+                                        # 组合成一个新的 Key 名字，例如: "数据集A - 心理资本"
+                                        unique_task_name = f"{current_dataset_name} - {m_name}"
+                                        saved_measures_found[unique_task_name] = df_sub[valid_cols].copy()
 
                 # ==============================================================
-                # 🚀 既然全部捞出来了，现在直接为你开启【全选/多选】批量运行模式！
+                # 🚀 渲染第二步的多选确认框：展示所有被完美切片出来的任务队列
                 # ==============================================================
                 if saved_measures_found:
-                    st.success(f"🎯 成功精准识别到您在清洗阶段保存的 **{len(saved_measures_found)}** 个维度结构！")
+                    st.success(f"🎯 成功从选中的 **{len(selected_names)}** 个数据集中，精准识别到 **{len(saved_measures_found)}** 个分析维度！")
                     
-                    # 真正的多选框：默认直接帮你【全选】所有检测到的 Measure 维度
                     selected_sub_measures = st.multiselect(
-                        "2. 请勾选要批量运行的 Measure（默认已全选，可一键批量运行）：",
+                        "2. 确认要批量运行的【数据集-Measure】组合清单（默认已全选）：",
                         options=list(saved_measures_found.keys()),
-                        default=list(saved_measures_found.keys()), # 默认全选！
-                        key=f"sub_batch_select_{selected_name}"
+                        default=list(saved_measures_found.keys()), # 默认全选，一键多跑！
+                        key="sub_batch_final_task_select"
                     )
                     
-                    # 将你勾选的多个维度，全部切片送入底部的批处理任务队列
-                    for m in selected_sub_measures:
-                        cols_to_slice = saved_measures_found[m]
-                        measures_to_process[m] = df_sub[cols_to_slice].copy()
+                    # 将最终确认的组合塞入底部的核心计算管道
+                    for task_key in selected_sub_measures:
+                        measures_to_process[task_key] = saved_measures_found[task_key]
                         
                 else:
-                    # 彻底无数据时的兜底
-                    st.warning("⚠️ 未能在系统缓存中匹配到任何合法的量表划分题目。")
-                    st.info("💡 已将整张子数据集作为独立问卷加入运行队列。")
-                    measures_to_process[selected_name] = df_sub
+                    # 兜底：如果没有划分 Measure，直接把每个选中的数据集整张表作为一个大任务
+                    st.info("💡 未检测到精细维度划分，已自动将每个子数据集整张表作为独立问卷加入队列。")
+                    for current_dataset_name in selected_names:
+                        df_sub = st.session_state.sub_datasets[current_dataset_name]
+                        measures_to_process[f"{current_dataset_name} (全量表)"] = df_sub.copy()
 
     else:
         uploaded_file = st.file_uploader("请上传用于分析的数据文件", type=['xlsx', 'xls', 'csv'])
