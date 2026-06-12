@@ -603,29 +603,28 @@ def render_n1_analysis():
                 df_sub = st.session_state.sub_datasets[selected_name]
                 
                 # ==============================================================
-                # 🎯 精准逆向还原：从 data_cleaning.py 的动态缓存中捞出你划分的 Measure
+                # 🎯 【强力无损打捞】不依赖数字 i，全量扫描内存中所有匹配的 Measure 存储
                 # ==============================================================
                 saved_measures_found = {}
                 
-                # 1. 尝试读取你在清洗页面定义的全部 Measure 名字列表
-                clean_measure_names = st.session_state.get("dc_measure_names", [])
-                
-                if clean_measure_names:
-                    # 2. 遍历这些名字，去匹配你在清洗阶段 smart_multiselect 留下来的动态 Key
-                    for i, m_name in enumerate(clean_measure_names):
-                        # 逆向构造 data_cleaning.py 第 530 行附近的动态 key 规则
-                        dynamic_key = f"dc_measure_cols_{m_name}_{i}"
-                        
-                        # 从 session_state 中精准打捞出你当时勾选的题目列表
-                        items_in_measure = st.session_state.get(dynamic_key, [])
-                        
-                        if items_in_measure:
-                            # 确保这些勾选的题目在当前子数据集中确实存在
-                            valid_cols = [c for c in items_in_measure if c in df_sub.columns]
-                            if len(valid_cols) >= 3:
-                                saved_measures_found[m_name] = valid_cols
-                
-                # 3. 兼容双文件模式的 dc_measures 缓存（双重保险）
+                # 策略 1：直接扫描 Session_state 里所有以 'dc_measure_cols_' 开头的清洗记录
+                for key in list(st.session_state.keys()):
+                    if key.startswith("dc_measure_cols_"):
+                        # 逆向解析出真正的 Measure 名字
+                        # 格式通常是: dc_measure_cols_{m_name}_{i}
+                        parts = key.split("_")
+                        if len(parts) >= 4:
+                            # 拼接中间可能带下划线的量表名，去掉前缀和最后的数字索引
+                            m_name = "_".join(parts[3:-1]) 
+                            items_in_measure = st.session_state[key]
+                            
+                            if items_in_measure and isinstance(items_in_measure, list):
+                                # 验证这些题在当前的子数据集中确实存在
+                                valid_cols = [c for c in items_in_measure if c in df_sub.columns]
+                                if len(valid_cols) >= 3:
+                                    saved_measures_found[m_name] = valid_cols
+
+                # 策略 2：如果策略 1 没抓到，用双文件模式的 dc_measures 缓存做第二重保险
                 if not saved_measures_found:
                     global_measures = st.session_state.get("dc_measures", {})
                     if global_measures:
@@ -635,27 +634,27 @@ def render_n1_analysis():
                                 saved_measures_found[m] = valid_cols
 
                 # ==============================================================
-                # 🚀 渲染前端多选框，实现真正的一键多跑批量运行
+                # 🚀 既然全部捞出来了，现在直接为你开启【全选/多选】批量运行模式！
                 # ==============================================================
                 if saved_measures_found:
-                    st.success(f"🎯 成功精准识别到您在清洗阶段划分的 **{len(saved_measures_found)}** 个 Measure 维度！")
+                    st.success(f"🎯 成功精准识别到您在清洗阶段保存的 **{len(saved_measures_found)}** 个维度结构！")
                     
-                    # 允许用户在子数据集上，勾选一个或多个维度同步批量运行
+                    # 真正的多选框：默认直接帮你【全选】所有检测到的 Measure 维度
                     selected_sub_measures = st.multiselect(
-                        "2. 请勾选要批量运行的 Measure（默认全选）:",
+                        "2. 请勾选要批量运行的 Measure（默认已全选，可一键批量运行）：",
                         options=list(saved_measures_found.keys()),
-                        default=list(saved_measures_found.keys()), # 一键多跑
+                        default=list(saved_measures_found.keys()), # 默认全选！
                         key=f"sub_batch_select_{selected_name}"
                     )
                     
-                    # 将用户选中的多个维度切片，送入批量计算队列
+                    # 将你勾选的多个维度，全部切片送入底部的批处理任务队列
                     for m in selected_sub_measures:
                         cols_to_slice = saved_measures_found[m]
                         measures_to_process[m] = df_sub[cols_to_slice].copy()
                         
                 else:
-                    # 4. 彻底的兜底方案
-                    st.warning("⚠️ 未能在系统缓存中匹配到有效的维度划分列。")
+                    # 彻底无数据时的兜底
+                    st.warning("⚠️ 未能在系统缓存中匹配到任何合法的量表划分题目。")
                     st.info("💡 已将整张子数据集作为独立问卷加入运行队列。")
                     measures_to_process[selected_name] = df_sub
 
