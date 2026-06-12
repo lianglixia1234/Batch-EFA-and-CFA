@@ -595,11 +595,39 @@ def render_n1_analysis():
 
     elif data_source == "💾 来自 Data Cleaning（子数据集）":
         dataset_names = list(st.session_state.sub_datasets.keys())
-        selected_name = st.selectbox("请选择已保存的子数据集:", dataset_names)
-        if selected_name:
-            df_sub = st.session_state.sub_datasets[selected_name]
-            # 尝试获取子数据集对应的题目划分，若无则全表作为一个 Measure
-            measures_to_process[selected_name] = df_sub
+        if not dataset_names:
+            st.warning("暂无已保存的子数据集，请先前往数据清洗页面保存。")
+        else:
+            selected_name = st.selectbox("1. 请选择已保存的子数据集:", dataset_names)
+            if selected_name:
+                df_sub = st.session_state.sub_datasets[selected_name]
+                
+                # 【核心改造】：联动读取清洗阶段划分的批量维度 (dc_measures)
+                global_measures = st.session_state.get("dc_measures", {})
+                
+                if global_measures:
+                    # 如果清洗阶段划分了维度，让用户多选要在这个子数据集上跑哪些维度
+                    measure_names = list(global_measures.keys())
+                    selected_sub_measures = st.multiselect(
+                        "2. 检测到清洗阶段划分的维度，请勾选要批量运行的 Measure（可多选）:",
+                        options=measure_names,
+                        default=measure_names, # 默认全选，实现一键多跑
+                        key=f"sub_batch_m_{selected_name}"
+                    )
+                    
+                    for m in selected_sub_measures:
+                        # 找出这个维度里，确实存在于当前子数据集中的列
+                        valid_cols = [c for c in global_measures[m] if c in df_sub.columns]
+                        if len(valid_cols) >= 3:
+                            # 将子数据集切片后，以 "维度名" 作为 Key 送入批量队列
+                            measures_to_process[m] = df_sub[valid_cols].copy()
+                        else:
+                            st.caption(f"⚠️ 维度 [{m}] 在当前子数据集中无有效对应列，已跳过。")
+                
+                # 兜底：如果完全没有划分过维度，则把当前子数据集整体当做一个多题量表
+                if not measures_to_process:
+                    st.info("💡 未检测到维度划分，已将整张子数据集作为独立问卷加入运行队列。")
+                    measures_to_process[selected_name] = df_sub
 
     else:
         uploaded_file = st.file_uploader("请上传用于分析的数据文件", type=['xlsx', 'xls', 'csv'])
