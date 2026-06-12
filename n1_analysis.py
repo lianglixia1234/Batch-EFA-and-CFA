@@ -58,39 +58,28 @@ def sort_table(loadings: pd.DataFrame, X=None) -> pd.DataFrame:
     return L
 
 def pca_algo(df, graph=False):
-    # 获取数值列并进行全面清理
+    """
+    修改后：直接在全样本上计算 PCA，剔除 Bootstrap
+    """
     items = df.select_dtypes(include=[np.number])
-
-    # 移除NaN和Inf值
     items = items.replace([np.inf, -np.inf], np.nan).dropna()
     items = items[~items.isin([np.inf, -np.inf]).any(axis=1)]
 
     if items.empty:
         return pd.DataFrame(), 1
 
-    # 再次确认没有NaN或Inf值
-    if items.isnull().any().any() or np.isinf(items.values).any():
-        # 如果仍有问题，进行最后的清理
-        items = items.dropna()
-        items = items.replace([np.inf, -np.inf], np.nan).dropna()
-        items = items[~items.isin([np.inf, -np.inf]).any(axis=1)]
-
-    if items.empty:
-        return pd.DataFrame(), 1
-
     try:
-        Z = StandardScaler().fit_transform(items.values)  # 使用.values确保是numpy数组
-
-        # 最后检查标准化数据
+        # 直接使用全样本标准化
+        Z = StandardScaler().fit_transform(items.values)
         if np.isnan(Z).any() or np.isinf(Z).any():
             st.error("标准化后数据仍包含NaN或Inf值，请检查原始数据质量")
             return pd.DataFrame(), 1
-
     except Exception as e:
         st.error(f"数据标准化失败: {e}")
         return pd.DataFrame(), 1
 
     try:
+        # 使用全样本评估特征值
         fa_tmp = FactorAnalyzer(n_factors=items.shape[1], rotation=None, method='minres')
         fa_tmp.fit(Z)
         eigen_all = fa_tmp.get_eigenvalues()[0]
@@ -150,26 +139,14 @@ def dscpt_stats_mode(val_list):
     return mode_val
 
 def bootstrap_pca(df, boot_time=20):
-    factor_num_list = []
-    progress_text = "正在进行 PCA Bootstrapping..."
-    my_bar = st.progress(0, text=progress_text)
-    
-    for i in range(boot_time):
-        idx = np.random.choice(df.index, size=int(len(df)*0.8), replace=False)
-        temp = df.loc[idx].copy()
-        
-        if temp.std().sum() == 0:
-            continue
-            
-        _, factor_num = pca_algo(temp, graph=False)
-        factor_num_list.append(factor_num)
-        my_bar.progress((i + 1) / boot_time, text=f"{progress_text} ({i+1}/{boot_time})")
-    
-    my_bar.empty()
-    if not factor_num_list:
-        return 1
-    factor_num_final = dscpt_stats_mode(factor_num_list)
+    """
+    修改后：完全取消 Bootstrap 抽样，直接返回全样本的碎石图拐点
+    """
+    _, factor_num_final = pca_algo(df, graph=False)
     return factor_num_final
+
+
+
 
 def align_loadings(raw_loadings, ref):
     L = raw_loadings.reindex(index=ref.index)
@@ -189,15 +166,15 @@ def align_loadings(raw_loadings, ref):
     return aligned
 
 def efa_once(df, k, scaler=None):
-    # 获取数值列并移除缺失值
+    """
+    单次 EFA 核心计算（直接在传入的完整数据集上运行）
+    """
     X = df.select_dtypes(include=[np.number]).dropna(axis=0, how='any')
-
-    # 额外检查：移除包含无穷大值的行
     X = X.replace([np.inf, -np.inf], np.nan).dropna()
     X = X[~X.isin([np.inf, -np.inf]).any(axis=1)]
 
     if X.empty:
-        raise RuntimeError("No valid numeric data available for EFA analysis")
+        raise RuntimeError("没有合法的数值列可用于全样本 EFA 分析")
 
     if scaler is None:
         scaler = StandardScaler()
@@ -205,19 +182,19 @@ def efa_once(df, k, scaler=None):
     try:
         Z = scaler.fit_transform(X)
     except Exception as e:
-        raise RuntimeError(f"Data standardization failed: {e}")
+        raise RuntimeError(f"全样本数据标准化失败: {e}")
 
-    # 检查标准化后的数据是否包含NaN或Inf
     if np.isnan(Z).any() or np.isinf(Z).any():
-        raise RuntimeError("Standardized data contains NaN or Inf values")
+        raise RuntimeError("标准化后的全样本数据包含 NaN 或 Inf 值")
 
+    # 保持原代码的 minres 和 varimax 旋转
     fa = FactorAnalyzer(n_factors=k, rotation='varimax', method='minres')
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             fa.fit(Z)
     except Exception as e:
-        raise RuntimeError(f"EFA failed: {e}")
+        raise RuntimeError(f"全样本 EFA 模型拟合/旋转失败: {e}")
 
     loadings = pd.DataFrame(fa.loadings_, index=X.columns, columns=[f'F{i+1}' for i in range(k)])
     return sort_table(loadings, X)
@@ -254,13 +231,16 @@ def bootstrap_efa(df, factor_num, boot_time=50, max_retry=3, random_state=42):
     return loadings_list
 
 def calculate_loadings_avg(current_df, factor_num_final):
-    loadings_list = bootstrap_efa(current_df, factor_num_final, boot_time=50)
-    if len(loadings_list) == 0:
-        raise RuntimeError("Bootstrap EFA failed for all samples.")
-    loadings_cat = pd.concat(loadings_list)
-    loadings_avg = loadings_cat.groupby(level=0).mean()
-    loadings_avg = loadings_avg.loc[loadings_list[0].index, loadings_list[0].columns]
-    return loadings_avg
+    """
+    修改后：完全移除 bootstrap_efa 函数调用和循环重试逻辑，
+    直接调用 efa_once 计算全样本因子载荷矩阵。
+    """
+    try:
+        # 直接对当前全量样本运行单次 EFA，不再进行任何抽样
+        loadings_final = efa_once(current_df, factor_num_final)
+        return loadings_final
+    except Exception as e:
+        raise RuntimeError(f"全样本 EFA 分析彻底失败，原因: {e}")
 
 def _primary_factor_and_cross(loadings_row):
     abs_vals = loadings_row.abs().values
@@ -272,22 +252,24 @@ def _primary_factor_and_cross(loadings_row):
 
 def delete_items(loadings_avg, current_df, k, min_items_per_factor=3, 
                  min_primary_loading=0.40, min_cross_loading=0.40, cross_ratio=0.70, min_communality=0.30,
-                whitelist=None):
+                 whitelist=None):
     """
     增强的删题策略，包含三类删除标准：
       1) 主载荷低于 min_primary_loading
       2) 强交叉载荷（次/主比 > cross_ratio 且 次载荷 > min_cross_loading）
-      3) 共同度（communality）低于 min_communality
+      3) 共同度（communality）低于动态设定的阈值（当对应因子题目数<5时，降至0.2）
 
     逻辑：
-      - 首先根据主载荷 / 交叉载荷 / 共同度进行 item 分类（mutually exclusive，按优先级：主载荷 -> 交叉 -> 共同度）
+      - 首先进行预扫描，统计每个因子当前分到的题目总数
+      - 动态调整共同度阈值：如果某因子当前题目数 < 5，则其共同度判汰标准降为 0.20
+      - 根据主载荷 / 交叉载荷 / 共同度进行 item 分类（mutually exclusive，按优先级：主载荷 -> 交叉 -> 共同度）
       - 对每类候选按严重程度排序（主载荷和共同度越低越优先；交叉按 次/主 比值从高到低）
       - 删除时保证不会将某个因子的题目数降到 min_items_per_factor 以下
     """
     primary_assign = {}
     candidates_low = []    # (item, p_idx, primary_loading)
     candidates_cross = []  # (item, p_idx, ratio, second_loading)
-    candidates_comm = []   # (item, p_idx, communality)
+    candidates_comm = []   # (item, p_idx, communality, dynamic_threshold)
 
     if whitelist is None:
         whitelist = []
@@ -295,13 +277,33 @@ def delete_items(loadings_avg, current_df, k, min_items_per_factor=3,
     # 共同度由平均载荷矩阵计算：每题的 communality = sum(loadings^2)
     communalities = (loadings_avg ** 2).sum(axis=1)
 
+    # ---------------------------------------------------------
+    # 第一步：【新增】预扫描，统计每个因子当前的初始题目数
+    # ---------------------------------------------------------
+    current_counts = np.zeros(k, dtype=int)
     for item, row in loadings_avg.iterrows():
-        # 【关键逻辑】如果题目在白名单里，直接跳过检查，绝不删除
+        p_idx, p, s = _primary_factor_and_cross(row)
+        primary_assign[item] = p_idx
+        current_counts[p_idx] += 1
+
+    # ---------------------------------------------------------
+    # 第二步：循环检查每道题目，应用动态共同度标准
+    # ---------------------------------------------------------
+    for item, row in loadings_avg.iterrows():
+        # 如果题目在白名单里，直接跳过检查，绝不删除
         if item in whitelist:
             continue 
         
-        p_idx, p, s = _primary_factor_and_cross(row)
-        primary_assign[item] = p_idx
+        p_idx = primary_assign[item]
+        # 获取预扫描出来的指标
+        _, p, s = _primary_factor_and_cross(row)
+
+        # 【核心改动】：动态调整共同度门槛
+        # 如果该题所属的因子目前题目总数小于 5 题，标准降到 0.20；否则维持传入的默认值（如 0.30）
+        if current_counts[p_idx] < 5:
+            current_min_comm = 0.20
+        else:
+            current_min_comm = min_communality
 
         # 优先判定：主载荷过低
         if p < min_primary_loading:
@@ -309,18 +311,13 @@ def delete_items(loadings_avg, current_df, k, min_items_per_factor=3,
         # 再判定：强交叉载荷
         elif s > min_cross_loading and (p > 0) and (s / p) > cross_ratio:
             candidates_cross.append((item, p_idx, (s / p), s))
-        # 再判定：共同度过低
-        elif communalities.loc[item] < min_communality:
-            candidates_comm.append((item, p_idx, float(communalities.loc[item])))
+        # 再判定：共同度过低（此处使用动态计算出的 current_min_comm）
+        elif communalities.loc[item] < current_min_comm:
+            candidates_comm.append((item, p_idx, float(communalities.loc[item]), current_min_comm))
 
     # 如果没有任何候选，直接返回
     if not candidates_low and not candidates_cross and not candidates_comm:
         return None
-
-    # 统计每因子当前题目数
-    counts = np.zeros(k, dtype=int)
-    for item, p_idx in primary_assign.items():
-        counts[p_idx] += 1
 
     # 排序：主载荷越低越先删除；共同度越低越先删除；交叉按 ratio 从高到低
     candidates_low.sort(key=lambda t: t[2])            # ascending primary loading
@@ -328,62 +325,66 @@ def delete_items(loadings_avg, current_df, k, min_items_per_factor=3,
     candidates_cross.sort(key=lambda t: t[2], reverse=True)  # descending ratio
 
     # 合并优先级：低主载荷 -> 低共同度 -> 交叉载荷
-    merged = [('low',) + c for c in candidates_low] + \
-             [('comm',) + c for c in candidates_comm] + \
-             [('cross',) + c for c in candidates_cross]
+    # 注意：为了统一解包格式，我们在 comm 的元组里把动态门槛传递过去
+    merged = [('low', item, p_idx, p, None) for item, p_idx, p in candidates_low] + \
+             [('comm', item, p_idx, comm, thres) for item, p_idx, comm, thres in candidates_comm] + \
+             [('cross', item, p_idx, ratio, s) for item, p_idx, ratio, s in candidates_cross]
 
     # 按合并后的优先级依次尝试删除第一个合适的题目
-    for tag, item, p_idx, metric, *rest in merged:
-        # 不允许把某个因子题目数降到 <= min_items_per_factor
-        if counts[p_idx] <= min_items_per_factor:
+    for tag, item, p_idx, metric, extra in merged:
+        # 不允许把某个因子题目数降到 <= min_items_per_factor (默认 3)
+        if current_counts[p_idx] <= min_items_per_factor:
             continue
         
         msg = ""
         if tag == 'low':
-            msg = f"删除题目 **{item}**：因子载荷过低 (主载荷={metric:.3f} < {min_primary_loading})"
+            msg = f"删除题目 **{item}**：因子载荷过低 (主载荷={metric:.3f} < {min_primary_loading}) [所属因子当前含 {current_counts[p_idx]} 题]"
         elif tag == 'cross':
-            second_loading = rest[0] if rest else float('nan')
-            msg = f"删除题目 **{item}**：强交叉载荷 (次/主比={metric:.3f} > {cross_ratio}，次载荷≈{second_loading:.3f})"
+            msg = f"删除题目 **{item}**：强交叉载荷 (次/主比={metric:.3f} > {cross_ratio}，次载荷≈{extra:.3f}) [所属因子当前含 {current_counts[p_idx]} 题]"
         elif tag == 'comm':
-            msg = f"删除题目 **{item}**：共同度过低 (Communality={metric:.3f} < {min_communality})"
+            # extra 存放的是这一轮该题触发的动态共同度门槛值
+            msg = f"删除题目 **{item}**：共同度过低 (Communality={metric:.3f} < 动态阈值 {extra:.2f}) [因该因子题目数 {current_counts[p_idx]} < 5，阈值已自动降为 0.20]"
         
         st.write(f"🛑 {msg}") 
         return item
 
     # 若未在上面找到合适且满足因子保护（min_items_per_factor）的题目，兜底删除最严重的一个
     if merged:
-        _tag, item, p_idx, _metric, *_rest = merged[0]
+        _tag, item, p_idx, _metric, _extra = merged[0]
         msg = ""
         if _tag == 'low':
             msg = f"删除题目 **{item}**：因子载荷过低 (主载荷={_metric:.3f}) [兜底删除]"
         elif _tag == 'cross':
             msg = f"删除题目 **{item}**：强交叉载荷 (次/主比={_metric:.3f}) [兜底删除]"
         elif _tag == 'comm':
-            msg = f"删除题目 **{item}**：共同度过低 (Communality={_metric:.3f}) [兜底删除]"
+            msg = f"删除题目 **{item}**：共同度过低 (Communality={_metric:.3f} < 动态阈值 {_extra:.2f}) [兜底删除]"
         
         st.write(f"🛑 {msg}") 
         return item
+        
     return None
 
 def run_pipeline_streamlit(df, fixed_factors=None, max_iterations=100, whitelist=None):
+    """
+    整个迭代删题的主管道，内部逻辑保持完全一致，但调用的底层函数已全面改为全样本计算
+    """
     current_df = df.select_dtypes(include=[np.number]).copy()
     
-    # 1. Determine Factor Number
+    # 1. 确定因子数量
     factor_num_final = 1
-    
     if fixed_factors is not None:
         factor_num_final = int(fixed_factors)
         st.info(f"ℹ️ 使用用户手动指定的因子数量: **{factor_num_final}**")
     else:
-        with st.spinner("正在通过 Bootstrap PCA 评估最佳因子数量..."):
-            factor_num_final = bootstrap_pca(current_df, boot_time=20)
-        st.success(f"✅ Bootstrap PCA 建议的因子数: **{factor_num_final}**")
+        with st.spinner("正在通过全样本评估最佳因子数量..."):
+            factor_num_final = bootstrap_pca(current_df)
+        st.success(f"✅ 全样本建议的因子数: **{factor_num_final}**")
 
-    # 2. First Average Loadings
-    with st.spinner(f"正在基于 {factor_num_final} 个因子进行初始 Bootstrap EFA 计算..."):
+    # 2. 首次计算全样本因子载荷
+    with st.spinner(f"正在基于 {factor_num_final} 个因子进行全样本 EFA 计算..."):
         loadings_table_avg = calculate_loadings_avg(current_df, factor_num_final)
 
-    # 3. Iterative Deletion
+    # 3. 循环迭代删题流程
     seen = set()
     iteration = 0
     deleted_items = []
@@ -398,20 +399,17 @@ def run_pipeline_streamlit(df, fixed_factors=None, max_iterations=100, whitelist
             st.warning(f"⚠️ 检测到重复建议删除 {item_to_delete}，提前停止以避免震荡。")
             break
 
-        # 剩余题目 <= 3 时停止
         if current_df.shape[1] <= 3:
             st.warning("⚠️ 剩余题目数量已降至 3 题，为了保证模型可识别性，停止继续删题。")
-            # 这里的 item_to_delete 虽然被计算出来了，选择不执行删除
             break
-        # =========================================================
         
         seen.add(item_to_delete)
-
         current_df = current_df.drop(columns=[item_to_delete])
         deleted_items.append(item_to_delete)
 
         status_container.info(f"正在进行第 {iteration + 1} 轮迭代计算 (已删除 {len(deleted_items)} 题)...")
         
+        # 迭代时也是直接用全样本更新载荷
         loadings_table_avg = calculate_loadings_avg(current_df, factor_num_final)
         item_to_delete = delete_items(loadings_table_avg, current_df, factor_num_final, whitelist=whitelist)
 
