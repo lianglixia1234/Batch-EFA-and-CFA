@@ -16,11 +16,11 @@ def main():
         key="page"
     )
     
-    if st.session_state.page == "数据清洗":
-        render_data_cleaning()
-    
-    elif st.session_state.page == "N1分析":
-        render_n1_analysis()
+        if st.session_state.page == "数据清洗":
+            render_data_cleaning()
+        
+        elif st.session_state.page == "N1分析":
+            render_n1_analysis()
 
 if __name__ == "__main__":
     main()
