@@ -8,6 +8,4 @@ matplotlib
 seaborn
 openpyxl
 XlsxWriter
-warnings
 factor-analyzer
-datetime
