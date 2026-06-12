@@ -232,15 +232,46 @@ def bootstrap_efa(df, factor_num, boot_time=50, max_retry=3, random_state=42):
 
 def calculate_loadings_avg(current_df, factor_num_final):
     """
-    修改后：完全移除 bootstrap_efa 函数调用和循环重试逻辑，
-    直接调用 efa_once 计算全样本因子载荷矩阵。
+    【彻底修复版】完全移除所有对齐逻辑、循环、重试和标准差计算。
+    只在全样本上运行一次 EFA，直接返回单次运行得到的干净的 DataFrame。
     """
     try:
-        # 直接对当前全量样本运行单次 EFA，不再进行任何抽样
-        loadings_final = efa_once(current_df, factor_num_final)
-        return loadings_final
+        # 1. 提取纯数字列，防止类型硬伤
+        X = current_df.select_dtypes(include=[np.number]).dropna(axis=0, how='any')
+        X = X.replace([np.inf, -np.inf], np.nan).dropna()
+        X = X[~X.isin([np.inf, -np.inf]).any(axis=1)]
+
+        if X.empty or X.shape[1] < factor_num_final:
+            raise RuntimeError(f"有效数字题目列数 ({X.shape[1]}) 小于指定的因子数 ({factor_num_final})，无法分析。")
+
+        # 2. 直接在全样本上进行标准化
+        from sklearn.preprocessing import StandardScaler
+        Z = StandardScaler().fit_transform(X)
+        
+        if np.isnan(Z).any() or np.isinf(Z).any():
+            raise RuntimeError("标准化后的数据包含 NaN 或 Inf 值，请检查数据是否存在某题所有人得分一样（方差为0）。")
+
+        # 3. 运行 FactorAnalyzer (写死稳定的最小残差法 minres 和正交旋转 varimax)
+        # 如果你的业务需要斜交旋转，可以把 varimax 改成 promax
+        fa = FactorAnalyzer(n_factors=factor_num_final, rotation='varimax', method='minres')
+        
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            fa.fit(Z)
+        
+        # 4. 组装成带有题项名称作为行索引的 DataFrame 载荷矩阵
+        loadings_final = pd.DataFrame(
+            fa.loadings_, 
+            index=X.columns, 
+            columns=[f'F{i+1}' for i in range(factor_num_final)]
+        )
+        
+        # 5. 调用原脚本中自带的排序函数对表格进行格式化
+        return sort_table(loadings_final, X)
+
     except Exception as e:
-        raise RuntimeError(f"全样本 EFA 分析彻底失败，原因: {e}")
+        # 把底层真正的数学报错或者工程报错抛出来，不再隐藏在“全样本失败”的套话里
+        raise RuntimeError(f"底层全样本 EFA 执行失败，病灶原因为: {e}")
 
 def _primary_factor_and_cross(loadings_row):
     abs_vals = loadings_row.abs().values
