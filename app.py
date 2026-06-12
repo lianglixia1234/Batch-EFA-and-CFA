@@ -7,16 +7,17 @@ st.set_page_config(layout="wide")
 def main():
     st.sidebar.title("导航")
 
-    # 注意这里把所有选项放在一个列表里
-    page = st.sidebar.radio(
+    st.sidebar.radio(
         "选择模块",
-        ["数据清洗", "N1分析"]
+        ["数据清洗", "N1分析"],
+        key="page"
     )
-
-    if page == "数据清洗":
+    
+    if st.session_state.page == "数据清洗":
         render_data_cleaning()
-    elif page == "N1分析":
-        render_n1_analysis()  # 点击 N1分析 时运行这个函数
+    
+    elif st.session_state.page == "N1分析":
+        render_n1_analysis()
 
 if __name__ == "__main__":
     main()
