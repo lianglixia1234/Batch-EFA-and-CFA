@@ -9,5 +9,5 @@ seaborn
 openpyxl
 XlsxWriter
 warnings
-factor_analyzer
+factor-analyzer
 datetime
