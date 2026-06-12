@@ -778,12 +778,13 @@ def render_n1_analysis():
         st.session_state.batch_n1_results = batch_results
 
     # ==========================================================================
-    # 5. 集中化多 Tab 面板呈现与用户单项微调、确认
+    # ==========================================================================
+    # 5. 集中化多 Tab 面板呈现与用户单项微调、确认（每个维度独立表单导出）
     # ==========================================================================
     if st.session_state.batch_n1_results:
         st.markdown("---")
         st.subheader("📥 批量结果确认与指标综合审查面板")
-        st.info("💡 切换下方的问卷标签页（Tabs），可以无干扰地独立审查并导出每个 Measure 问卷对应的删题结果、载荷矩阵及信效度报告。")
+        st.info("💡 切换下方的问卷标签页（Tabs），可以独立审查并【单独下载】每个 Measure 问卷对应的独立 Excel 数据表报告。")
 
         active_tab_names = list(st.session_state.batch_n1_results.keys())
         tabs = st.tabs(active_tab_names)
@@ -875,7 +876,6 @@ def render_n1_analysis():
                                     fixed_factors=n_factors,
                                     whitelist=items_to_restore
                                 )
-                                # 写回缓存
                                 st.session_state.batch_n1_results[m_name] = {
                                     "success": True,
                                     "final_df": f_df,
@@ -887,98 +887,76 @@ def render_n1_analysis():
                                 }
                                 st.rerun()
 
-                # 5.6 单维度问卷结果最终确认勾选
+                st.markdown("#### 📥 独立数据表导出")
                 st.checkbox(f"💾 确认并批准 【{m_name}】 的数据结论与删题结构", key=f"confirm_check_{m_name}")
 
-        # ==========================================================================
-        # 6. 一键打包生成多工作表(Multi-Sheet) Excel 综合报告导出
-        # ==========================================================================
-        st.markdown("---")
-        st.markdown("### 📥 一键批量导出多 Sheet Excel 汇总报告")
-        st.caption("系统将把所有分析成功的 Measure 数据自动写入同一个 Excel 文件的不同 Sheet 页中，并按题目序号自动重排序输出。")
-        
-        with st.form("batch_excel_report_form"):
-            measure_ids = {}
-            for m_name in active_tab_names:
-                if st.session_state.batch_n1_results[m_name]["success"]:
-                    measure_ids[m_name] = st.text_input(
-                        f"量表「{m_name}」的 measure_id (非空编码，如英文缩写)",
-                        value=m_name[:10],
-                        key=f"batch_mid_{m_name}"
-                    )
-            
-            submitted = st.form_submit_button("⚡ 编译并打包批量数据报告")
-            if submitted:
+                # ==============================================================
+                # 🚨 【核心改造点】：在每个 Tab 内部，直接为当前 Measure 编译并提供专属 Excel 下载
+                # ==============================================================
                 try:
-                    buf = io.BytesIO()
-                    with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
-                        for m_name in active_tab_names:
-                            res_m = st.session_state.batch_n1_results[m_name]
-                            if not res_m["success"]:
-                                continue
-                                
-                            mid = (measure_ids.get(m_name) or m_name).strip()
-                            df_f = res_m["final_df"]
-                            loads = res_m["final_loadings"]
-                            kept_m = res_m["kept"]
-                            
-                            # 指标计算
-                            k_all, k_mod = calculate_kmo(df_f)
-                            chi_v, p_v = calculate_bartlett_sphericity(df_f)
-                            alpha_rem_df = alpha_after_removal(df_f)
-                            alpha_lookup = alpha_rem_df.set_index("删除的题项")["Cronbach's α"]
-                            itc_df = calculate_item_total_correlation(df_f)
-                            communalities = (loads ** 2).sum(axis=1)
-                            _, _, s_stat, s_p = check_residual_normality(df_f, loads)
-                            
-                            sorted_items = sort_item_cols_by_number(kept_m)
-                            rows = []
-                            
-                            for item in sorted_items:
-                                pre, num, text = parse_item_col(item)
-                                item_txt = text or item
-                                rev = 1 if (isinstance(item, str) and item.rstrip().endswith("r")) else 0
-                                load_row = loads.loc[item] if item in loads.index else pd.Series(dtype=float)
-                                
-                                # 从题名中智能抽取序号
-                                prefix = str(item_txt).strip().split("_", 1)[0]
-                                m_match = re.search(r"(\d+)", prefix)
-                                item_num = int(m_match.group(1)) if m_match else ""
-                                
-                                row = {
-                                    "measure_id": mid,
-                                    "item_number": item_num,
-                                    "item_text": item_txt,
-                                    "reverse": rev,
-                                }
-                                for c in loads.columns:
-                                    row[c] = load_row.get(c, np.nan)
-                                row["KMO"] = k_mod
-                                row["Bartlett_chi2"] = chi_v
-                                row["Bartlett_p"] = p_v
-                                row["alpha_after_removal"] = alpha_lookup.get(item, np.nan)
-                                row["item_total_correlation"] = itc_df.loc[item, "Item-Total Corr"] if item in itc_df.index else np.nan
-                                row["communality"] = communalities.get(item, np.nan)
-                                row["residual_Shapiro_W_stat"] = s_stat
-                                row["residual_Shapiro_W_p"] = s_p
-                                rows.append(row)
-                                
-                            sheet_df = pd.DataFrame(rows)
-                            s_name = "".join(c for c in mid[:30] if c not in '[]:*?/\\')
-                            sheet_df.to_excel(w, sheet_name=s_name or "Sheet", index=False)
-                            
-                    buf.seek(0)
-                    st.session_state.batch_excel_bytes = buf.getvalue()
-                    st.success("✨ 多 Sheet 批量综合报告编译成功！点击下方按钮即可一键全量保存。")
-                except Exception as e:
-                    st.error(f"编译批量报告时遇到硬伤: {e}")
-
-        if st.session_state.get("batch_excel_bytes"):
-            user_name = st.session_state.get("user_name", "batch_user")
-            today = date.today().strftime("%Y-%m-%d")
-            st.download_button(
-                "⬇️ 下载批量自动化多工作表 Excel 报告",
-                data=st.session_state.batch_excel_bytes,
-                file_name=f"batch_efa_summary_report_{today}_{user_name}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+                    # 实时计算当前维度的全套数据报表
+                    k_all, k_mod = calculate_kmo(df_final)
+                    chi_v, p_v = calculate_bartlett_sphericity(df_final)
+                    alpha_rem_df = alpha_after_removal(df_final)
+                    alpha_lookup = alpha_rem_df.set_index("删除的题项")["Cronbach's α"]
+                    itc_df = calculate_item_total_correlation(df_final)
+                    communalities = (loadings ** 2).sum(axis=1)
+                    _, _, s_stat, s_p = check_residual_normality(df_final, loadings)
+                    
+                    sorted_items = sort_item_cols_by_number(kept)
+                    rows = []
+                    
+                    for item in sorted_items:
+                        pre, num, text = parse_item_col(item)
+                        item_txt = text or item
+                        rev = 1 if (isinstance(item, str) and item.rstrip().endswith("r")) else 0
+                        load_row = loadings.loc[item] if item in loadings.index else pd.Series(dtype=float)
+                        
+                        prefix = str(item_txt).strip().split("_", 1)[0]
+                        m_match = re.search(r"(\d+)", prefix)
+                        item_num = int(m_match.group(1)) if m_match else ""
+                        
+                        row = {
+                            "measure_id": m_name,
+                            "item_number": item_num,
+                            "item_text": item_txt,
+                            "reverse": rev,
+                        }
+                        for c in loadings.columns:
+                            row[c] = load_row.get(c, np.nan)
+                        row["KMO"] = k_mod
+                        row["Bartlett_chi2"] = chi_v
+                        row["Bartlett_p"] = p_v
+                        row["alpha_after_removal"] = alpha_lookup.get(item, np.nan)
+                        row["item_total_correlation"] = itc_df.loc[item, "Item-Total Corr"] if item in itc_df.index else np.nan
+                        row["communality"] = communalities.get(item, np.nan)
+                        row["residual_Shapiro_W_stat"] = s_stat
+                        row["residual_Shapiro_W_p"] = s_p
+                        rows.append(row)
+                        
+                    # 构造当前维度的独立数据表
+                    single_measure_df = pd.DataFrame(rows)
+                    
+                    # 转化为二进制字节流
+                    single_buf = io.BytesIO()
+                    with pd.ExcelWriter(single_buf, engine="xlsxwriter") as single_writer:
+                        # 统一使用 Cleaned_Report 作为表内 sheet 名
+                        single_measure_df.to_excel(single_writer, sheet_name="EFA_Report", index=False)
+                    single_buf.seek(0)
+                    
+                    # 生成专属文件名
+                    today_str = date.today().strftime("%Y-%m-%d")
+                    user_name = st.session_state.get("user_name", "user")
+                    safe_m_name = "".join(c for c in m_name if c not in '[]:*?/\\ ')
+                    file_filename = f"EFA_Report_{safe_m_name}_{today_str}_{user_name}.xlsx"
+                    
+                    # 亮出独立的下载按钮
+                    st.download_button(
+                        label=f"⬇️ 下载 【{m_name}】 的独立 Excel 报告",
+                        data=single_buf.getvalue(),
+                        file_name=file_filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"download_btn_single_{m_name}"
+                    )
+                except Exception as ex_build:
+                    st.caption(f"⚠️ 该维度的 Excel 独立导出表编译受限: {ex_build}")
