@@ -652,7 +652,7 @@ def render_stage1_efa_clean():
                         
                 else:
                     # 兜底：如果没有划分 Measure，直接把每个选中的数据集整张表作为一个大任务
-                    st.info("💡 未检测到精细维度划分，已自动将每个子数据集整张表作为独立问卷加入队列。")
+                    st.info("💡 将每个子数据集整张表作为独立问卷加入队列。")
                     for current_dataset_name in selected_names:
                         df_sub = st.session_state.sub_datasets[current_dataset_name]
                         measures_to_process[f"{current_dataset_name} (全量表)"] = df_sub.copy()
