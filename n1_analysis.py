@@ -15,26 +15,7 @@ import re
 import io
 from datetime import date
 
-# ==============================================================================
-# 🛠️ 针对 Python 3.14 + sklearn 最新版的兼容性猴子补丁（修复 force_all_finite 报错）
-# ==============================================================================
-import sklearn.utils.validation
-import inspect
 
-# 获取原本的 check_array 函数
-_orig_check_array = sklearn.utils.validation.check_array
-
-def _patched_check_array(*args, **kwargs):
-    """
-    动态拦截拦截旧参数，将其安全替换为新版 sklearn 支持的参数名
-    """
-    if 'force_all_finite' in kwargs:
-        kwargs['ensure_all_finite'] = kwargs.pop('force_all_finite')
-    return _orig_check_array(*args, **kwargs)
-
-# 强行用修正后的函数覆盖 sklearn 的原生函数
-sklearn.utils.validation.check_array = _patched_check_array
-# ==============================================================================
 # ==============================================================================
 # 核心算法区域
 # ==============================================================================
