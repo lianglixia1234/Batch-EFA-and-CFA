@@ -1020,3 +1020,28 @@ def render_stage1_efa_clean():
                             f" * 🟢 **{sub_m}** ── 精炼保留题目: `{len(config['kept_items'])}` 题 | "
                             f"推荐 CFA 验证潜变量/因子数: `{config['n_factors']}` | *更新时间: {config['timestamp']}*"
                         )
+
+# ==============================================================================
+# 🌟 顶层三大板块隔离调度中心
+# ==============================================================================
+def render_n1_analysis():
+    st.title("📊 模块 2: N1数据分析")
+
+    # 使用 st.tabs 将三大核心分析板块在水平方向彻底隔离
+    tab_efa_clean, tab_cfa_clean, tab_efa_final = st.tabs([
+        "🔄 1. 自动删题 EFA 板块", 
+        "🧪 2. 自动删题 CFA 板块", 
+        "📝 3. 最终不删题 EFA 板块"
+    ])
+
+    # 板块一：直接渲染原逻辑改名后的核心 EFA
+    with tab_efa_clean:
+        render_stage1_efa_clean()
+
+    # 板块二：自动删题 CFA (读取 Stage 1 的 N1_preEFA 资产进行分析)
+    with tab_cfa_clean:
+        render_stage2_cfa_clean()
+
+    # 板块三：不删题 EFA (用于最终论文汇报或验证最终锁定的题目)
+    with tab_efa_final:
+        render_stage3_efa_no_deletion()
