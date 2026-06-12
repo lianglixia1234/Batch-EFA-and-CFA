@@ -8,7 +8,7 @@ def main():
 
     page = st.sidebar.radio(
         "选择模块",
-        ["数据清洗"]
+        ["数据清洗"],["N1分析"]
     )
 
     if page == "数据清洗":
