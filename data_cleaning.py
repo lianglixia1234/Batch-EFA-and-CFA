@@ -2314,7 +2314,7 @@ def render_data_cleaning():
         with col1:
             # 1. 定义一个回调函数，专门用来改状态
             def go_to_n1():
-                st.session_state.nav_selection = "2. N1 EFA数据分析"
+                st.session_state.nav_selection = "N1分析"
             
             # 2. 在按钮里使用 on_click 参数调用这个函数
             st.button(
