@@ -779,21 +779,26 @@ def render_n1_analysis():
 
     # ==========================================================================
     # ==========================================================================
-    # 5. 集中化多 Tab 面板呈现与用户单项微调、确认（每个维度独立表单导出）
+    # ==========================================================================
+    # 5. 集中化多 Tab 面板呈现与用户单项微调、确认（每个维度独立表单导出 + 状态存储）
     # ==========================================================================
     if st.session_state.batch_n1_results:
         st.markdown("---")
         st.subheader("📥 批量结果确认与指标综合审查面板")
-        st.info("💡 切换下方的问卷标签页（Tabs），可以独立审查并【单独下载】每个 Measure 问卷对应的独立 Excel 数据表报告。")
+        st.info("💡 切换下方的问卷标签页（Tabs），可以独立审查、持久化保存状态并【单独下载】每个维度对应的独立 Excel 报告。")
 
         active_tab_names = list(st.session_state.batch_n1_results.keys())
         tabs = st.tabs(active_tab_names)
+
+        # 在外部初始化 N1_preEFA 核心全局缓存字典
+        if "N1_preEFA" not in st.session_state:
+            st.session_state.N1_preEFA = {}
 
         for i, m_name in enumerate(active_tab_names):
             res = st.session_state.batch_n1_results[m_name]
             
             with tabs[i]:
-                st.markdown(f"### 📋 维度: {m_name}")
+                st.markdown(f"### 📋 任务维度: {m_name}")
                 if not res["success"]:
                     st.error(f"❌ 问卷分析由于数学边界或奇异矩阵崩溃，核心错误原因: {res['error_msg']}")
                     continue
@@ -887,14 +892,54 @@ def render_n1_analysis():
                                 }
                                 st.rerun()
 
-                st.markdown("#### 📥 独立数据表导出")
-                st.checkbox(f"💾 确认并批准 【{m_name}】 的数据结论与删题结构", key=f"confirm_check_{m_name}")
+                # ==============================================================
+                # 🚨 【核心升级点 1】：解耦并拆分 复合 Key，将状态稳稳存入 N1_preEFA 缓存
+                # ==============================================================
+                st.markdown("#### 4️⃣ 数据状态持久化与独立导出")
+                
+                # 智能识别当前复合键中包含的「数据集名称」和「Measure名称」
+                # 格式预期: "子数据集A - 心理资本"，如无分隔符则兜底归类
+                if " - " in m_name:
+                    ds_name_extracted, real_measure_id = m_name.split(" - ", 1)
+                else:
+                    ds_name_extracted = "Default_SubDataset"
+                    real_measure_id = m_name
+
+                # 双重校验：判断此前是否已被保存，用于初始化复选框默认勾选状态
+                is_previously_saved = (
+                    ds_name_extracted in st.session_state.N1_preEFA and 
+                    real_measure_id in st.session_state.N1_preEFA[ds_name_extracted]
+                )
+
+                # 审核状态单选框
+                is_confirmed = st.checkbox(
+                    f"💾 确认将量表【{real_measure_id}】的终审题目与结构锁入 `N1_preEFA` 缓存", 
+                    value=is_previously_saved,
+                    key=f"confirm_check_{m_name}"
+                )
+
+                # 联动存储与清除逻辑
+                if is_confirmed:
+                    if ds_name_extracted not in st.session_state.N1_preEFA:
+                        st.session_state.N1_preEFA[ds_name_extracted] = {}
+                    
+                    # 极其精准地记录该 Measure 的灵魂资产
+                    st.session_state.N1_preEFA[ds_name_extracted][real_measure_id] = {
+                        "kept_items": list(kept),      # N1 过滤后确认保留的题目
+                        "n_factors": int(n_factors),   # N1 模型推荐提取的因子数
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                else:
+                    # 用户取消勾选时动态移除
+                    if ds_name_extracted in st.session_state.N1_preEFA:
+                        if real_measure_id in st.session_state.N1_preEFA[ds_name_extracted]:
+                            del st.session_state.N1_preEFA[ds_name_extracted][real_measure_id]
 
                 # ==============================================================
-                # 🚨 【核心改造点】：在每个 Tab 内部，直接为当前 Measure 编译并提供专属 Excel 下载
+                # 🚨 【核心升级点 2】：根据精准的 real_measure_id 生成独立 Excel 报告下载
                 # ==============================================================
                 try:
-                    # 实时计算当前维度的全套数据报表
+                    # 实时计算当前维度的多特征全量数据指标表
                     k_all, k_mod = calculate_kmo(df_final)
                     chi_v, p_v = calculate_bartlett_sphericity(df_final)
                     alpha_rem_df = alpha_after_removal(df_final)
@@ -917,7 +962,7 @@ def render_n1_analysis():
                         item_num = int(m_match.group(1)) if m_match else ""
                         
                         row = {
-                            "measure_id": m_name,
+                            "measure_id": real_measure_id,   # 精准使用独立的 measure_id 写入文件
                             "item_number": item_num,
                             "item_text": item_txt,
                             "reverse": rev,
@@ -934,25 +979,24 @@ def render_n1_analysis():
                         row["residual_Shapiro_W_p"] = s_p
                         rows.append(row)
                         
-                    # 构造当前维度的独立数据表
+                    # 构造仅包含本维度数据的独立 DataFrame
                     single_measure_df = pd.DataFrame(rows)
                     
-                    # 转化为二进制字节流
+                    # 编译为独立的 Excel 文件字节流
                     single_buf = io.BytesIO()
                     with pd.ExcelWriter(single_buf, engine="xlsxwriter") as single_writer:
-                        # 统一使用 Cleaned_Report 作为表内 sheet 名
                         single_measure_df.to_excel(single_writer, sheet_name="EFA_Report", index=False)
                     single_buf.seek(0)
                     
-                    # 生成专属文件名
+                    # 文件安全命名规则（去除非法文件字符）
                     today_str = date.today().strftime("%Y-%m-%d")
                     user_name = st.session_state.get("user_name", "user")
-                    safe_m_name = "".join(c for c in m_name if c not in '[]:*?/\\ ')
-                    file_filename = f"EFA_Report_{safe_m_name}_{today_str}_{user_name}.xlsx"
+                    safe_measure_id = "".join(c for c in real_measure_id if c not in '[]:*?/\\ ')
+                    file_filename = f"EFA_Report_{safe_measure_id}_{today_str}_{user_name}.xlsx"
                     
-                    # 亮出独立的下载按钮
+                    # 输出独立的下载组件
                     st.download_button(
-                        label=f"⬇️ 下载 【{m_name}】 的独立 Excel 报告",
+                        label=f"⬇️ 下载 【{real_measure_id}】 维度的独立 Excel 报告",
                         data=single_buf.getvalue(),
                         file_name=file_filename,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -960,3 +1004,19 @@ def render_n1_analysis():
                     )
                 except Exception as ex_build:
                     st.caption(f"⚠️ 该维度的 Excel 独立导出表编译受限: {ex_build}")
+
+        # ==========================================================================
+        # 6. 页面最底部全局大看板：实时监测并预览 N1_preEFA 配置资产状态
+        # ==========================================================================
+        if st.session_state.N1_preEFA:
+            st.markdown("---")
+            with st.expander("🚀 查看当前准备对接 Batch CFA 的 `N1_preEFA` 全局资产清单", expanded=True):
+                st.success("📊 缓存中已成功登记以下审定结构，后续 CFA（验证性因子分析）模块将直接一键调取这些数据：")
+                
+                for d_key, m_dict in st.session_state.N1_preEFA.items():
+                    st.markdown(f"#### 📦 数据集容器: `{d_key}`")
+                    for sub_m, config in m_dict.items():
+                        st.markdown(
+                            f" * 🟢 **{sub_m}** ── 精炼保留题目: `{len(config['kept_items'])}` 题 | "
+                            f"推荐 CFA 验证潜变量/因子数: `{config['n_factors']}` | *更新时间: {config['timestamp']}*"
+                        )
