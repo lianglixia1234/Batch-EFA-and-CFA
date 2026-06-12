@@ -10,7 +10,7 @@ from sklearn.preprocessing import StandardScaler
 from factor_analyzer import FactorAnalyzer
 from factor_analyzer.factor_analyzer import calculate_kmo, calculate_bartlett_sphericity
 from scipy.stats import shapiro
-from .utils import smart_multiselect, parse_item_col, sort_item_cols_by_number
+from utils import smart_multiselect, parse_item_col, sort_item_cols_by_number
 import re
 import io
 from datetime import date
