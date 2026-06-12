@@ -1040,8 +1040,8 @@ def render_n1_analysis():
 
     # 板块二：自动删题 CFA (读取 Stage 1 的 N1_preEFA 资产进行分析)
     with tab_cfa_clean:
-        render_stage2_cfa_clean()
+        # render_stage2_cfa_clean()
 
     # 板块三：不删题 EFA (用于最终论文汇报或验证最终锁定的题目)
     with tab_efa_final:
-        render_stage3_efa_no_deletion()
+        # render_stage3_efa_no_deletion()
