@@ -719,7 +719,7 @@ def render_stage1_efa_clean():
     c_p1, c_p2 = st.columns(2)
     with c_p1:
         factor_method = st.radio(
-            "因子数量确定方式 (全量问卷公用):",
+            "因子数量确定方式 (全部问卷通用):",
             ["👆 强制指定统一因子数","🤖 系统自动评估 (碎石图拐点)"],
             horizontal=True
         )
