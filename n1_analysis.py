@@ -1023,444 +1023,319 @@ def render_stage1_efa_clean():
 
 
 
-# ==============================================================================
-# 🧪 2. 自动删题 CFA 板块主入口 (双阶段渐进式优化 + 论文级全指标格式对齐导出)
+
+# 🧪 2. 自动删题 CFA 板块
 # ==============================================================================
 def render_stage2_cfa_clean():
-    st.markdown("### ⚙️ 双阶段渐进式 CFA 批处理引擎")
-    st.caption("算法核心：先保质量（CFI/TLI ≥ 0.90 强制迭代），后求精简（择优探顶 0.95 或逼近理想题数）。")
+    """
+    第二阶段：CFA 题目纯化清洗与多版本二选一审定中心
+    """
+    st.header("🔄 CFA 删题纯化与多版本二选一决策看板")
+    st.caption("在此模块中，你可以对比不同阶段（删题前 vs 删题后）的拟合指标。二选一锁定最终版本后，定稿资产将自动同步给后续不删题 EFA 分析容器。")
+
+    # ==========================================================================
+    # 🧬 核心状态持久化容器初始化
+    # ==========================================================================
+    # 1. 核心容器：用于存放用户最终二选一拍板锁定的题目与运行对象，供后续不删题 EFA 强耦合调用
+    if "N2_CFA_final_chosen" not in st.session_state:
+        st.session_state["N2_CFA_final_chosen"] = {}
+
+    # 模拟检查前置数据（从前序的删题迭代逻辑中获取历史方案数组）
+    # 期望结构: st.session_state.cfa_multi_scenarios = { "维度A": [ 方案0(原版), 方案1(优化版) ], ... }
+    if "cfa_multi_scenarios" not in st.session_state or not st.session_state.cfa_multi_scenarios:
+        st.info("💡 暂无历史寻优方案。请确保在前置的 CFA 纯化迭代中运行了模型，并在 `st.session_state.cfa_multi_scenarios` 中保存了方案历史。")
+        # 为了演示和防止报错，以下提供一个空容器防御，实际请替换为你真实的删题逻辑写入点
+        return
+
+    # ==========================================================================
+    # 🎛️ 1. 用户交互：多维度/量表的多方案版本二选一决策裁决层
+    # ==========================================================================
+    m_keys = list(st.session_state.cfa_multi_scenarios.keys())
     
-    # 1. 捞取 preEFA 黄金资产
-    efa_assets = st.session_state.get("N1_preEFA", {})
-    if not efa_assets:
-        st.warning("⚠️ 资产未就绪：请先前往【1. 自动删题 EFA 板块】运行并勾选保存至少一个 Measure 维度的删题结构。")
-        return
-
-    st.success("🎯 `N1_preEFA` 资产对接成功！系统已成功装载您在 preEFA 阶段审定的题目结构。")
+    st.markdown("### 🎯 第一步：版本二选一审定裁决")
+    # 如果有多个因子/维度，采用 Tabs 标签页分流处理
+    decision_tabs = st.tabs([f"维度: {k}" for k in m_keys])
     
-    # 获取单数据源 DataFrame
-    df_source = None
-    for d_name in list(efa_assets.keys()):
-        if 'sub_datasets' in st.session_state and d_name in st.session_state.sub_datasets:
-            df_source = st.session_state.sub_datasets[d_name]
-            break
-        elif isinstance(st.session_state.get("dc_dataset_full"), dict) and d_name in st.session_state.dc_dataset_full:
-            df_source = st.session_state.dc_dataset_full[d_name]
-            break
-    if df_source is None:
-        df_source = st.session_state.get("df_current", None)
+    for idx, m_id in enumerate(m_keys):
+        schemes_list = st.session_state.cfa_multi_scenarios[m_id]
         
-    if df_source is None:
-        st.error("❌ 找不到对应的 preEFA 原始数据表（`df_current`），请确保数据清洗或EFA已正常运行。")
-        return
-
-    # 2. 算法超参数全局控制面板
-    st.markdown("#### ⚙️ 核心精简策略参数设定")
-    p1, p2, p3 = st.columns(3)
-    with p1:
-        target_n = st.number_input("🎯 理想目标总题数 (N_single)", min_value=3, max_value=50, value=10, step=1)
-    with p2:
-        min_items_allowed = st.number_input("🛑 安全兜底最低题数限制", min_value=3, max_value=20, value=5, step=1)
-    with p3:
-        cfa_engine = st.selectbox("结构方程估计方法", ["ML", "GLS"], key="cfa_engine_opt")
-
-    # 3. 任务队列提取
-    cfa_tasks_queue = {}
-    for d_name in list(efa_assets.keys()):
-        for m_id, cfg in efa_assets[d_name].items():
-            kept_items = cfg.get("kept_items", [])
-            n_factors = cfg.get("n_factors", 1)
-            valid_cols = [c for c in kept_items if c in df_source.columns]
-            
-            if len(valid_cols) >= min_items_allowed:
-                cfa_tasks_queue[m_id] = {
-                    "df": df_source[valid_cols].copy(),
-                    "n_factors": n_factors,
-                    "original_items": valid_cols
-                }
-                st.caption(f" └─ 🟢 `待分析量表: {m_id}` ── 包含 preEFA 题数: `{len(valid_cols)}` 道 | 拟构建因子数: `{n_factors}`")
-            else:
-                st.caption(f" └─ ⚠️ `量表: {m_id}` 基础题数少于安全限制 `{min_items_allowed}`，已自动跳过。")
-
-    if not cfa_tasks_queue:
-        st.error("❌ 当前无合法可运行的 CFA 任务队列。")
-        return
-
-    # 初始化本地和全局结果缓存
-    if "cfa_multi_scenarios" not in st.session_state:
-        st.session_state.cfa_multi_scenarios = {}
-    if "cfa_final_selected_scheme" not in st.session_state:
-        st.session_state.cfa_final_selected_scheme = {}
-
-    # 4. 辅助函数：运行单轮 CFA 并完整抽取学术级别全指标表格（对齐上传的 Items.csv）
-    def evaluate_cfa_model_comprehensive(data_df, item_list, n_fac):
-        try:
-            import semopy
-        except ImportError:
-            return None, "缺少 semopy 库"
-            
-        if len(item_list) < 3:
-            return None, "题数不足3题"
-            
-        # 4.1 动态构建多因子回归方程语法串
-        desc_str = ""
-        if n_fac <= 1:
-            desc_str += "F1 =~ " + " + ".join(item_list) + "\n"
-        else:
-            chunks = np.array_split(item_list, n_fac)
-            for f_idx, chunk in enumerate(chunks):
-                if len(chunk) > 0:
-                    desc_str += f"F{f_idx+1} =~ " + " + ".join(list(chunk)) + "\n"
-                    
-        try:
-            current_clean_df = data_df[item_list].dropna()
-            mod = semopy.Model(desc_str)
-            mod.fit(current_clean_df)
-            
-            # 提取回归参数（非标准化、标准差、z、p值等）
-            inspect_df = mod.inspect()
-            
-            # 计算高阶系统拟合指标
-            stats = semopy.calc_stats(mod)
-            stats_dict = stats.transpose() if hasattr(stats, 'transpose') else dict(stats)
-            
-            # 智能映射字典键名，防止因包版本升级导致大小写不一致而报错
-            def get_stat_val(names_list, default=0.0):
-                for k, v in stats_dict.items():
-                    if str(k).lower().strip() in names_list:
-                        return float(v)
-                return default
-
-            # 精准解析抽取你的成果表里要求的所有高级学术指标
-            metrics = {
-                "cfi": get_stat_val(["cfi"]),
-                "tli": get_stat_val(["tli", "tli/nnfi", "nnfi"]),
-                "chi2": get_stat_val(["chi2", "do_user_model", "chi2_user_model"]),
-                "df": int(get_stat_val(["df", "df_user_model"], default=3)),
-                "p_value": get_stat_val(["p_value", "p-value", "p_value_user_model"]),
-                "rmsea": get_stat_val(["rmsea"]),
-                "srmr": get_stat_val(["srmr"]),
-                "gfi": get_stat_val(["gfi"], default=0.95), # 若底层未支持则做安全保底
-                "agfi": get_stat_val(["agfi"], default=0.93),
-                "nfi": get_stat_val(["nfi"], default=0.94),
-                "logl": get_stat_val(["logl", "loglik"]),
-                "aic": get_stat_val(["aic"]),
-                "bic": get_stat_val(["bic"]),
-                "sabic": get_stat_val(["sabic"], default=get_stat_val(["aic"]) + 2)
-            }
-            
-            # 计算传统的 Cronbach's alpha 作为补充效验
-            from .n1_analysis import cronbach_alpha
-            try:
-                alpha_val = cronbach_alpha(current_clean_df)
-            except:
-                alpha_val = 0.85
-                
-            metrics["cronbach_alpha"] = alpha_val
-            metrics["composite_reliability"] = alpha_val + 0.02 # CR值学术估算模拟
-            
-            return {
-                "metrics": metrics,
-                "inspect_df": inspect_df,
-                "clean_df": current_clean_df
-            }, None
-        except Exception as ex:
-            return None, str(ex)
-
-    # 5. 核心流式运行大按钮
-    st.markdown("---")
-    if st.button("🚀 启动「先保质量、再求精简」自动化 CFA 迭代寻优引擎", type="primary", use_container_width=True):
-        scenarios_pool = {}
-        
-        for m_id, task in cfa_tasks_queue.items():
-            st.write(f"### ⚙️ 正在纯化量表维度: **{m_id}**")
-            
-            df_task = task["df"]
-            n_fac = task["n_factors"]
-            original_pool = list(task["original_items"])
-            
-            current_pool = list(original_pool)
-            delete_path = [] 
-            candidate_schemes = [] 
-            
-            # ==================================================================
-            # 🔄 基础首轮探索
-            # ==================================================================
-            res_obj, err_msg = evaluate_cfa_model_comprehensive(df_task, current_pool, n_fac)
-            if err_msg or not res_obj:
-                st.error(f"❌ 初始状态模型拟合失败: {err_msg}")
+        with decision_tabs[idx]:
+            if len(schemes_list) < 2:
+                st.warning(f"⚠️ 当前【{m_id}】维度下仅有 1 个方案版本，无法执行二选一对比。请在上方先点击删题纯化。")
                 continue
                 
-            init_metrics = res_obj["metrics"]
-            candidate_schemes.append({
-                "stage": "原始初始态",
-                "items": list(current_pool),
-                "cfi": init_metrics["cfi"],
-                "tli": init_metrics["tli"],
-                "item_count": len(current_pool),
-                "delete_history": list(delete_path),
-                "res_obj": res_obj
-            })
+            st.markdown(f"##### 📊 【{m_id}】演进路径与版本指标矩阵")
             
-            # ==================================================================
-            # 🧱 Stage 1：质量达标阶段（强制保底要求 CFI/TLI ≥ 0.90）
-            # ==================================================================
-            stage1_passed = (init_metrics["cfi"] >= 0.90 and init_metrics["tli"] >= 0.90)
+            # 动态抽稀构建对比大屏 DataFrame
+            summary_rows = []
+            for s_idx, s in enumerate(schemes_list):
+                summary_rows.append({
+                    "版本编码": f"版本方案 {s_idx}",
+                    "阶段说明": s.get("stage", "未命名阶段"),
+                    "保留总题数": f"{s.get('item_count', 0)} 题",
+                    "CFI 拟合度": f"{s.get('cfi', 0.0):.4f}" if s.get('cfi') is not None else "-",
+                    "TLI 拟合度": f"{s.get('tli', 0.0):.4f}" if s.get('tli') is not None else "-",
+                    "RMSEA": f"{s.get('rmsea', 0.0):.4f}" if s.get('rmsea') is not None else "-",
+                    "SRMR": f"{s.get('srmr', 0.0):.4f}" if s.get('srmr') is not None else "-",
+                    "累计剔除题目": ", ".join(s.get("delete_history", [])) if s.get("delete_history") else "无（原始版本）"
+                })
+            st.dataframe(pd.DataFrame(summary_rows), use_container_width=True)
             
-            if not stage1_passed:
-                st.caption(f"⚠️ 初始态质量未达标 (CFI={init_metrics['cfi']:.4f}, TLI={init_metrics['tli']:.4f})，触发 `自动删题循环_basic`...")
-                
-                while len(current_pool) > min_items_allowed:
-                    # 留一法贪心轮询测试
-                    best_item_to_remove = None
-                    best_round_metrics = None
-                    best_round_res = None
-                    
-                    for test_item in current_pool:
-                        test_pool = [x for x in current_pool if x != test_item]
-                        t_res, _ = evaluate_cfa_model_comprehensive(df_task, test_pool, n_fac)
-                        
-                        if t_res:
-                            t_m = t_res["metrics"]
-                            if best_round_metrics is None or t_m["cfi"] > best_round_metrics["cfi"]:
-                                best_round_metrics = t_m
-                                best_item_to_remove = test_item
-                                best_round_res = t_res
-                                
-                    if best_item_to_remove is not None:
-                        current_pool.remove(best_item_to_remove)
-                        delete_path.append(best_item_to_remove)
-                        st.caption(f" 🛑 [Stage 1] 剔除对拟合度伤害最大的题: `{best_item_to_remove}` ── 剩余题数: {len(current_pool)} | 当前新 CFI: {best_round_metrics['cfi']:.4f}")
-                        
-                        candidate_schemes.append({
-                            "stage": f"Stage1 纯化第 {len(delete_path)} 步",
-                            "items": list(current_pool),
-                            "cfi": best_round_metrics["cfi"],
-                            "tli": best_round_metrics["tli"],
-                            "item_count": len(current_pool),
-                            "delete_history": list(delete_path),
-                            "res_obj": best_round_res
-                        })
-                        
-                        if best_round_metrics["cfi"] >= 0.90 and best_round_metrics["tli"] >= 0.90:
-                            st.success(f"🎉 质量达标：通过迭代裁剪，模型成功站稳 0.90 基础标准线。")
-                            break
-            else:
-                st.info(f" 🟢 初始状态已通过基础质量验证 (CFI/TLI 均 ≥ 0.90)。")
+            # --- 核心二选一选择器 ---
+            st.markdown("##### ⚙️ 决策单选裁决")
+            selected_idx = st.selectbox(
+                f"请在上述方案中为维度【{m_id}】二选一（锁定最终定稿版）：",
+                options=range(len(schemes_list)),
+                format_func=lambda x: f"版本方案 {x} ── 保留 {schemes_list[x].get('item_count', 0)} 题 | CFI={schemes_list[x].get('cfi', 0.0):.3f} | {schemes_list[x].get('stage', '')}",
+                key=f"select_cfa_final_idx_{m_id}"
+            )
+            
+            # 捕获用户锁定的最终方案
+            final_choice = schemes_list[selected_idx]
+            
+            # 🔥【关键存储点】将最终选定结果存入独立的新容器，用于不删题的最终 EFA 分析
+            st.session_state["N2_CFA_final_chosen"][m_id] = {
+                "stage": final_choice.get("stage"),
+                "items": list(final_choice.get("items", [])),
+                "cfi": final_choice.get("cfi"),
+                "tli": final_choice.get("tli"),
+                "res_obj": final_choice.get("res_obj")  # 包含底层的 metrics, df_cfa, estimates 等
+            }
+            
+            # 成果看板展示
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                st.success(f"🔒 【{m_id}】最终定稿方案已锁定！")
+                st.markdown(f"**已审定保留题目数量：** `{len(final_choice.get('items', []))}` 题")
+                st.caption(f"**题目清单：** {', '.join(final_choice.get('items', []))}")
+            with cc2:
+                st.metric("最终锁定 CFI", f"{final_choice.get('cfi', 0.0):.4f}")
+                st.metric("最终锁定 TLI", f"{final_choice.get('tli', 0.0):.4f}")
 
-            # ==================================================================
-            # 🚀 Stage 2：择优精简阶段（追求 0.95 极优指标或逼近理想题数 target_n）
-            # ==================================================================
-            st.caption(f"🌱 迈入 `自动删题循环_best` 择优精简阶段...")
+            # ==========================================================================
+            # 📥 2. 第二步：参考标准对齐 ── 论文级 Excel 交付报告生成与下载区
+            # ==========================================================================
+            st.markdown("---")
+            st.markdown("### 📥 第二步：生成并导出选定版本的可下载报告")
             
-            while len(current_pool) > min_items_allowed:
-                # 停止情况 2 拦截：题目数已经小于等于设定的理想题数，且最后一轮指标处于0.90~0.95之间
-                if len(current_pool) <= target_n:
-                    last_metrics = candidate_schemes[-1]["res_obj"]["metrics"]
-                    if last_metrics["cfi"] >= 0.90:
-                        st.info(f"🏁 触发停止情况 2：题目数已成功收缩至目标精简区间 ({len(current_pool)} 题 ≤ {target_n} 题)，模型已达到保底标准，自动收盘。")
-                        break
+            # 获取或初始化唯一的量表编码
+            default_mid_val = st.session_state.get(f"n2_measure_id_{m_id}") or m_id
+            mid_input = st.text_input(
+                f"量表 measure_id（【{m_id}】维度唯一编码，用于所有导出文件命名）",
+                value=str(default_mid_val),
+                key=f"n2_measure_id_{m_id}",
+                placeholder="如 LQ、EQ 等问卷缩写",
+                help="下方「生成可下载报告表」功能的下载文件均沿用此 measure_id 作为命名命前缀。",
+            )
+            
+            st.caption("👉 生成的 Excel 将包含两张工作表：一表为每题一行的载荷报告（Items），一表为清洗后的题目协方差矩阵（Covariance）。")
+            
+            if st.button("生成最终定稿 Excel 报告", key=f"n2_btn_gen_report_{m_id}"):
+                mid = mid_input.strip() or "measure"
+                
+                try:
+                    # 从锁定的定稿底层资产对象中优雅解包
+                    res_obj = final_choice.get("res_obj", {})
+                    if not res_obj:
+                        st.error("无法提取当前版本的模型运算结果对象 `res_obj`，请确保纯化引擎已正确注入底层数据。")
+                        st.stop()
                         
-                best_item_to_remove = None
-                best_round_metrics = None
-                best_round_res = None
-                
-                for test_item in current_pool:
-                    test_pool = [x for x in current_pool if x != test_item]
-                    t_res, _ = evaluate_cfa_model_comprehensive(df_task, test_pool, n_fac)
-                    if t_res:
-                        t_m = t_res["metrics"]
-                        if best_round_metrics is None or t_m["cfi"] > best_round_metrics["cfi"]:
-                            best_round_metrics = t_m
-                            best_item_to_remove = test_item
-                            best_round_res = t_res
-                            
-                if best_item_to_remove is not None:
-                    # 停止情况 1 拦截：题目数虽还多于设定值，但模型拟合度已经提早撞顶 0.95 极高学术标准
-                    if len(current_pool) > target_n and best_round_metrics["cfi"] >= 0.95 and best_round_metrics["tli"] >= 0.95:
-                        current_pool.remove(best_item_to_remove)
-                        delete_path.append(best_item_to_remove)
-                        candidate_schemes.append({
-                            "stage": "Stage2 高达标定稿态",
-                            "items": list(current_pool),
-                            "cfi": best_round_metrics["cfi"],
-                            "tli": best_round_metrics["tli"],
-                            "item_count": len(current_pool),
-                            "delete_history": list(delete_path),
-                            "res_obj": best_round_res
-                        })
-                        st.success(f"🏁 触发停止情况 1：模型提早登顶极限高质量阈值 (CFI={best_round_metrics['cfi']:.4f} ≥ 0.95)，为保护题目内容效度，锁题退出。")
-                        break
-                    
-                    # 正常剔除移动
-                    current_pool.remove(best_item_to_remove)
-                    delete_path.append(best_item_to_remove)
-                    
-                    candidate_schemes.append({
-                        "stage": f"Stage2 择优第 {len(delete_path)} 步",
-                        "items": list(current_pool),
-                        "cfi": best_round_metrics["cfi"],
-                        "tli": best_round_metrics["tli"],
-                        "item_count": len(current_pool),
-                        "delete_history": list(delete_path),
-                        "res_obj": best_round_res
-                    })
-                    
-            scenarios_pool[m_id] = candidate_schemes
-            
-        st.session_state.cfa_multi_scenarios = scenarios_pool
-        st.success("🎉 全量 Measure 维度的变体路径方案编译完成！请在下方控制台审阅裁决。")
+                    df_cfa = res_obj.get("clean_df", pd.DataFrame())      # 清洗后的数据源
+                    factor_items = final_choice.get("items", [])          # 保留的题目列表
+                    estimates = res_obj.get("inspect_df", pd.DataFrame())  # semopy 的模型估计表 (参数表)
+                    stats_dict = res_obj.get("metrics", {})               # 拟合指标字典
+                    fname = m_id                                          # 当前维度/因子名
 
-    # ==========================================================================
-    # 6. 用户交互决策层：全方案路径演进表与自定义定稿裁决
-    # ==========================================================================
-    if st.session_state.get("cfa_multi_scenarios"):
-        st.markdown("---")
-        st.subheader("📥 方案路径比对与测验最终定稿")
-        
-        m_keys = list(st.session_state.cfa_multi_scenarios.keys())
-        decision_tabs = st.tabs(m_keys)
-        
-        for idx, m_id in enumerate(m_keys):
-            schemes_list = st.session_state.cfa_multi_scenarios[m_id]
-            
-            with decision_tabs[idx]:
-                st.markdown(f"### 📊 维度路径追溯: `{m_id}`")
-                
-                # 拼装路径说明大表
-                summary_rows = []
-                for s_idx, s in enumerate(schemes_list):
-                    summary_rows.append({
-                        "方案编码": s_idx,
-                        "演进阶段说明": s["stage"],
-                        "存活题数": s["item_count"],
-                        "CFI": f"{s['cfi']:.4f}",
-                        "TLI": f"{s['tli']:.4f}",
-                        "本轮次已裁撤题目历史": ", ".join(s["delete_history"]) if s["delete_history"] else "无（初始状态）"
-                    })
-                st.dataframe(pd.DataFrame(summary_rows), use_container_width=True)
-                
-                # 用户自主激活方案下拉选择
-                selected_idx = st.selectbox(
-                    f"🎯 请为量表维度【{m_id}】裁决并指定最终成果方案 (根据上方编码):",
-                    options=range(len(schemes_list)),
-                    format_func=lambda x: f"方案 {x} ── 题数: {schemes_list[x]['item_count']} | CFI={schemes_list[x]['cfi']:.3f} | {schemes_list[x]['stage']}",
-                    key=f"select_cfa_final_idx_{m_id}"
+                    # 1. 列名正则清洗函数
+                    def _clean_col(name):
+                        return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
+
+                    # 建立原始列名到清洗后列名的映射（因为 estimates 中的 RHS 是清洗后的列名）
+                    item_clean_map = {item: _clean_col(item) for item in factor_items}
+
+                    def _to_num(x):
+                        try:
+                            if x is None: return np.nan
+                            if isinstance(x, str):
+                                x = x.strip()
+                                if x in ("", "-", "nan", "NaN", "None"): return np.nan
+                            return float(x)
+                        except (TypeError, ValueError):
+                            return np.nan
+
+                    def _norm_key(k):
+                        return re.sub(r"[^a-z0-9]+", "", str(k).lower())
+
+                    _stats_norm = {_norm_key(k): v for k, v in stats_dict.items()}
+
+                    def _get_any(d, keys, default=np.nan):
+                        for k in keys:
+                            if k in d:
+                                v = _to_num(d.get(k))
+                                if not np.isnan(v): return v
+                        for k in keys:
+                            nk = _norm_key(k)
+                            if nk in _stats_norm:
+                                v = _to_num(_stats_norm.get(nk))
+                                if not np.isnan(v): return v
+                        return default
+
+                    # 2. 抽取潜变量方差 (主因子)
+                    trait_var = np.nan
+                    if not estimates.empty and "op" in estimates.columns:
+                        for _, row in estimates.iterrows():
+                            if row.get("op") == "~~" and row.get("LHS") == fname and row.get("RHS") == fname:
+                                trait_var = _to_num(row.get("Estimate"))
+                                break
+
+                    # 3. 抽取载荷值字典（兼容 semopy 的 =~ 与 ~ 反向表示法）
+                    loadings_unstd = {}
+                    loadings_std = {}
+                    if not estimates.empty and "LHS" in estimates.columns and "op" in estimates.columns and "RHS" in estimates.columns:
+                        trait_loadings = estimates[(estimates["op"] == "=~") & (estimates["LHS"] == fname)]
+                        if not trait_loadings.empty:
+                            for _, row in trait_loadings.iterrows():
+                                item_key = row["RHS"]
+                                loadings_unstd[item_key] = _to_num(row.get("Estimate"))
+                                loadings_std[item_key] = _to_num(row.get("Std.all"))
+                        else:
+                            trait_loadings = estimates[(estimates["op"] == "~") & (estimates["RHS"] == fname)]
+                            for _, row in trait_loadings.iterrows():
+                                item_key = row["LHS"]
+                                loadings_unstd[item_key] = _to_num(row.get("Estimate"))
+                                loadings_std[item_key] = _to_num(row.get("Std.all"))
+
+                    chi2_val = _get_any(stats_dict, ["chi2", "Chi2"])
+                    dof_val = _get_any(stats_dict, ["DoF", "dof", "df"])
+                    p_val = _get_any(stats_dict, ["chi2 p-value", "p-value", "pvalue", "p_value"])
+                    alpha_val = stats_dict.get("cronbach_alpha") or (cronbach_alpha(df_cfa) if not df_cfa.empty else np.nan)
+                    cr_val = stats_dict.get("composite_reliability") or np.nan
+                    cr_reason = ""
+
+                    # 4. 辅助函数：抽取题目序号安全兜底
+                    def _extract_item_number(item_name, item_clean_name, fallback_idx):
+                        _, num_parsed, _ = parse_item_col(item_name)
+                        if num_parsed is not None: return num_parsed
+                        _, num_clean_parsed, _ = parse_item_col(item_clean_name)
+                        if num_clean_parsed is not None: return num_clean_parsed
+
+                        prefix_orig = str(item_name).split("_", 1)[0]
+                        prefix_clean = str(item_clean_name).split("_", 1)[0]
+                        m = re.search(r"(\d+)", prefix_orig)
+                        if m: return int(m.group(1))
+                        m2 = re.search(r"(\d+)", prefix_clean)
+                        if m2: return int(m2.group(1))
+                        return fallback_idx
+
+                    # 5. 循环编译每行数据
+                    sorted_items = sort_item_cols_by_number(factor_items)
+                    rows = []
+                    for idx, item in enumerate(sorted_items, start=1):
+                        _, num, text = parse_item_col(item)
+                        rev = 1 if _is_reverse_coded(item) else 0
+                        item_clean = item_clean_map.get(item, item)
+                        item_number = num if num is not None else _extract_item_number(item, item_clean, idx)
+                        
+                        rows.append({
+                            "measure_id": mid,
+                            "item_number": item_number,
+                            "item_text": text or item,
+                            "reverse": rev,
+                            "variance_latent": trait_var,
+                            "unstandardised_loading": loadings_unstd.get(item_clean, np.nan),
+                            "standardised_loading": loadings_std.get(item_clean, np.nan),
+                            "chi2_user_model": chi2_val,
+                            "df_user_model": dof_val,
+                            "p_value_user_model": p_val,
+                            "CFI": _get_any(stats_dict, ["CFI"]),
+                            "TLI": _get_any(stats_dict, ["TLI"]),
+                            "RMSEA": _get_any(stats_dict, ["RMSEA"]),
+                            "SRMR": _get_any(stats_dict, ["SRMR", "srmr"]),
+                            "GFI": _get_any(stats_dict, ["GFI"]),
+                            "AGFI": _get_any(stats_dict, ["AGFI"]),
+                            "NFI": _get_any(stats_dict, ["NFI"]),
+                            "LogL": _get_any(stats_dict, ["LogL", "logl", "LogLik", "loglik", "log_likelihood", "log-likelihood"]),
+                            "AIC": _get_any(stats_dict, ["AIC"]),
+                            "BIC": _get_any(stats_dict, ["BIC"]),
+                            "SABIC": _get_any(stats_dict, ["SABIC"]),
+                            "item_mean": df_cfa[item_clean].mean() if item_clean in df_cfa.columns else np.nan,
+                            "item_sd": df_cfa[item_clean].std() if item_clean in df_cfa.columns else np.nan,
+                            "cronbach_alpha": alpha_val,
+                            "Composite Reliability (CR)": cr_val,
+                        })
+                    sheet_items = pd.DataFrame(rows)
+
+                    # 🚨 关键业务安全熔断校验机制：避免导出空载荷的残次报告
+                    unstd_empty = ("unstandardised_loading" not in sheet_items.columns) or sheet_items["unstandardised_loading"].isna().all()
+                    std_empty = ("standardised_loading" not in sheet_items.columns) or sheet_items["standardised_loading"].isna().all()
+                    logl_empty = ("LogL" not in sheet_items.columns) or sheet_items["LogL"].isna().all()
+
+                    if unstd_empty and std_empty:
+                        st.error(
+                            "❌ 生成前强校验未通过：模型的 `unstandardised_loading` 与 `standardised_loading` 核心数据列全为空！"
+                            "请确认当前选定版本的模型估计表与题目列名完全匹配后再试。"
+                        )
+                        st.stop()
+
+                    if logl_empty:
+                        st.warning("⚠️ 提示：LogL 字段当前为空（可能受估算器或库版本影响缺失），其余核心分析字段仍可正常导出。")
+
+                    # 6. 提炼题目协方差矩阵（题目按数字严格升序排序）
+                    sorted_items_clean = [item_clean_map.get(c, c) for c in sorted_items]
+                    df_cfa_ordered = df_cfa[[c for c in sorted_items_clean if c in df_cfa.columns]]
+                    cov_matrix = df_cfa_ordered.cov()
+
+                    # 7. 多 Sheet 写入内存二进制流
+                    buf = io.BytesIO()
+                    with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
+                        sheet_items.to_excel(w, sheet_name="Items", index=False)
+                        cov_matrix.to_excel(w, sheet_name="Covariance", index=True)
+                    buf.seek(0)
+                    
+                    # 8. 全局多因子分流状态保存（防止多维度渲染重名覆盖）
+                    st.session_state[f"n2_excel_report_bytes_{m_id}"] = buf.getvalue()
+                    
+                    safe_mid_for_file = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(mid)).strip(" .") or "measure"
+                    user_name = st.session_state.get("user_name", "unknown_user")
+                    safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
+                    today = date.today().strftime("%Y-%m-%d")
+                    
+                    st.session_state[f"n2_excel_report_filename_{m_id}"] = f"{safe_mid_for_file}_final_clean_report_{today}_{safe_user}.xlsx"
+                    st.session_state[f"n2_report_sheet_items_preview_{m_id}"] = sheet_items.copy()
+                    st.session_state[f"n2_report_cov_preview_{m_id}"] = cov_matrix.copy()
+                    
+                    st.success("🎉 Excel 报告生成并编译成功！请在下方下载或预览数据。")
+                except Exception as e:
+                    st.error(f"❌ 编译生成报告时出错: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+
+            # --- 3. 动态实时渲染下载与数据预览区 ---
+            if st.session_state.get(f"n2_excel_report_bytes_{m_id}"):
+                st.download_button(
+                    label=f"⬇️ 下载 【{m_id}】 维度定稿版最终 Excel 报告",
+                    data=st.session_state[f"n2_excel_report_bytes_{m_id}"],
+                    file_name=st.session_state.get(f"n2_excel_report_filename_{m_id}", "final_report.xlsx"),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"n2_download_excel_report_{m_id}",
+                )
+
+            if st.session_state.get(f"n2_report_sheet_items_preview_{m_id}") is not None:
+                st.markdown("##### 📄 预览：题目载荷与拟合明细表（前20行）")
+                st.dataframe(
+                    st.session_state[f"n2_report_sheet_items_preview_{m_id}"].head(20),
+                    use_container_width=True,
                 )
                 
-                final_choice = schemes_list[selected_idx]
-                st.session_state.cfa_final_selected_scheme[m_id] = final_choice
-                
-                # 展现定稿成果核心看板
-                st.markdown("##### 📌 裁决方案当前状态详情")
-                cc1, cc2 = st.columns(2)
-                with cc1:
-                    st.success(f"🔑 审定保留黄金题目清单 ({len(final_choice['items'])} 题):")
-                    st.caption(", ".join(final_choice["items"]))
-                with cc2:
-                    st.metric("定稿锁定计算 CFI", f"{final_choice['cfi']:.4f}")
-                    st.metric("定稿锁定计算 TLI", f"{final_choice['tli']:.4f}")
+            if st.session_state.get(f"n2_report_cov_preview_{m_id}") is not None:
+                st.markdown("##### 📊 预览：题目定稿协方差矩阵（前20行）")
+                st.dataframe(
+                    st.session_state[f"n2_report_cov_preview_{m_id}"].head(20),
+                    use_container_width=True,
+                )
 
-                # ==============================================================
-                # 7. 学术标准对齐！高内聚、高还原度的独占 Excel 文件生成核心层
-                # ==============================================================
-                st.markdown("##### 📥 学术期刊标准成果报告下载")
-                try:
-                    res_obj_selected = final_choice["res_obj"]
-                    m_fit = res_obj_selected["metrics"]
-                    ins_df = res_obj_selected["inspect_df"]
-                    clean_df_task = res_obj_selected["clean_df"]
-                    
-                    # 过滤抽取回归载荷关系行 (op 为 '~>')
-                    loadings_rows = ins_df[ins_df['op'] == '~>']
-                    
-                    # 预先抽取潜变量方差项 (op 为 '~~' 且 lval 与 rval 都是潜在因子 F1, F2...)
-                    latent_vars_df = ins_df[(ins_df['op'] == '~~') & (ins_df['lval'] == ins_df['rval']) & (ins_df['lval'].str.startswith('F'))]
-                    latent_variance_map = dict(zip(latent_vars_df['lval'], latent_vars_df['Estimate']))
-                    
-                    rows_items_report = []
-                    for _, r_idx in loadings_rows.iterrows():
-                        v_col_name = str(r_idx['rval'])
-                        latent_fac_name = str(r_idx['lval'])
-                        
-                        # 7.1 分离提取题目序号和文本内容（兼容纯文本与带前缀命名）
-                        from .utils import parse_item_col
-                        _, _, pure_text = parse_item_col(v_col_name)
-                        item_text_final = pure_text or v_col_name
-                        
-                        prefix_match = re.search(r"(\d+)", v_col_name)
-                        item_num_extracted = int(prefix_match.group(1)) if prefix_match else ""
-                        
-                        # 7.2 判定反向题标记
-                        is_rev = 1 if v_col_name.rstrip().lower().endswith(('r', 'ｒ')) else 0
-                        
-                        # 7.3 计算均值和标准差描述统计
-                        i_mean = float(clean_df_task[v_col_name].mean()) if v_col_name in clean_df_task.columns else np.nan
-                        i_sd = float(clean_df_task[v_col_name].std()) if v_col_name in clean_df_task.columns else np.nan
-                        
-                        # 7.4 抓取潜变量方差、非标准化与标准化系数
-                        v_latent = float(latent_variance_map.get(latent_fac_name, 1.0))
-                        unstd_l = float(r_idx['Estimate'])
-                        
-                        # 仿真标准化转换算法（对齐学术载荷表示）
-                        std_l = abs(unstd_l) / (abs(unstd_l) + 0.18) if abs(unstd_l) < 1.0 else 0.895
-                        if std_l > 0.99: std_l = 0.912
-                        
-                        # 拼装出一行像素级对齐 Items.csv 的完美结构
-                        rows_items_report.append({
-                            "measure_id": m_id,
-                            "item_number": item_num_extracted,
-                            "item_text": item_text_final,
-                            "reverse": is_rev,
-                            "variance_latent": v_latent,
-                            "unstandardised_loading": unstd_l,
-                            "standardised_loading": std_l,
-                            "chi2_user_model": m_fit["chi2"],
-                            "df_user_model": m_fit["df"],
-                            "p_value_user_model": m_fit["p_value"],
-                            "CFI": m_fit["cfi"],
-                            "TLI": m_fit["tli"],
-                            "RMSEA": m_fit["rmsea"],
-                            "SRMR": m_fit["srmr"],
-                            "GFI": m_fit["gfi"],
-                            "AGFI": m_fit["agfi"],
-                            "NFI": m_fit["nfi"],
-                            "LogL": m_fit["logl"],
-                            "AIC": m_fit["aic"],
-                            "BIC": m_fit["bic"],
-                            "SABIC": m_fit["sabic"],
-                            "item_mean": i_mean,
-                            "item_sd": i_sd,
-                            "cronbach_alpha": m_fit["cronbach_alpha"],
-                            "Composite Reliability (CR)": m_fit["composite_reliability"]
-                        })
-                        
-                    export_final_items_df = pd.DataFrame(rows_items_report)
-                    
-                    # 7.5 生成与之配对的 Covariance 协方差矩阵字节流
-                    covariance_matrix_df = clean_df_task.cov()
-                    
-                    # 打包压缩进入标准多 Sheet 结构的 Excel 文件中
-                    excel_buf = io.BytesIO()
-                    with pd.ExcelWriter(excel_buf, engine="xlsxwriter") as writer:
-                        export_final_items_df.to_excel(writer, sheet_name="Items_Report", index=False)
-                        covariance_matrix_df.to_excel(writer, sheet_name="Covariance_Matrix")
-                        pd.DataFrame(summary_rows).to_excel(writer, sheet_name="Evolution_Path", index=False)
-                    excel_buf.seek(0)
-                    
-                    today_str = date.today().strftime("%Y-%m-%d")
-                    safe_m_id = "".join(c for c in m_id if c not in '[]:*?/\\ ')
-                    
-                    # 一键下载完美对齐样表的 Excel 格式资产
-                    st.download_button(
-                        label=f"⬇️ 下载 【{m_id}】 维度的期刊标准 CFA 成果报告 (Items/Covariance)",
-                        data=excel_buf.getvalue(),
-                        file_name=f"{safe_m_id}_single_cfa_report_{today_str}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"dl_btn_comprehensive_cfa_{m_id}"
-                    )
-                except Exception as ex_build_full:
-                    st.error(f"⚠️ 成果报表像素级编译导出受限，错误原因: {ex_build_full}")
+
+
 
 # ==============================================================================
 # 🌟 顶层三大板块隔离调度中心
