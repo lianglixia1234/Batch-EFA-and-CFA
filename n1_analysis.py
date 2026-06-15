@@ -1045,24 +1045,47 @@ def render_stage2_cfa_clean():
     # ==========================================================================
     # 🔗 2. 上游强鲁棒解包层：提取 N1 自动删题完毕的多个 Sub_Dataset 资产
     # ==========================================================================
+    # ==========================================================================
+    # 🔗 2. 上游强鲁棒解包层：全面适配两层级联的 N1_preEFA 资产
+    # ==========================================================================
     n1_asset = st.session_state.get("N1_preEFA")
     if not n1_asset:
         st.info("💡 暂未检测到 N1_preEFA 登记资产。请确保在前置模块中完成了 N1 阶段的数据集精炼。")
         return
 
-    # 深度遍历并解析 N1 资产中的子数据集清单 (支持直接是字典或级联字典)
     sub_datasets = {}
+    
     if isinstance(n1_asset, dict):
-        # 情况A：直接挂载了子数据集（如你的日志：{"Sub_Dataset_1": {...}, "Sub_Dataset_2": {...}}）
+        # 深度遍历第一层：数据集容器键 (例如："子数据集A")
+        for ds_key, measure_dict in n1_asset.items():
+            if isinstance(measure_dict, dict):
+                # 深度遍历第二层：真实的 Measure (例如："心理资本")
+                for m_id, m_config in measure_dict.items():
+                    if isinstance(m_config, dict) and "kept_items" in m_config:
+                        # 构造复合唯一任务键名，供 CFA 阶段展示
+                        composite_key = f"{ds_key} - {m_id}"
+                        
+                        # 核心联动：从系统缓存 sub_datasets 中动态捞出对应的 DataFrame 实体
+                        raw_df_entity = None
+                        if "sub_datasets" in st.session_state and ds_key in st.session_state.sub_datasets:
+                            raw_df_entity = st.session_state.sub_datasets[ds_key]
+                        elif "dc_dataset_full" in st.session_state:
+                            raw_df_entity = st.session_state.dc_dataset_full
+                        else:
+                            raw_df_entity = st.session_state.get("df_source")
+                        
+                        # 封装成 Stage 2 后续 CFA 引擎所渴望的标准数据包格式
+                        sub_datasets[composite_key] = {
+                            "items": m_config["kept_items"],
+                            "clean_df": raw_df_entity
+                        }
+
+    # 如果多层级联没捞到，执行传统单层或兜底防护
+    if not sub_datasets:
         for k, v in n1_asset.items():
             if isinstance(v, dict) and ("items" in v or "clean_df" in v or "df" in v):
                 sub_datasets[k] = v
-        
-        # 情况B：n1_asset 自身就是一个单一数据集结构
-        if not sub_datasets and ("items" in n1_asset or "clean_df" in n1_asset):
-            sub_datasets["Default_SubDataset"] = n1_asset
 
-    # 如果还捞不到，从外部 df_source 做最后防御适配
     if not sub_datasets:
         df_source_backup = st.session_state.get("df_source")
         if df_source_backup is not None and not df_source_backup.empty:
