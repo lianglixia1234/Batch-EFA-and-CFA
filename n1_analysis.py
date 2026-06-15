@@ -719,7 +719,7 @@ def render_stage1_efa_clean():
     c_p1, c_p2 = st.columns(2)
     with c_p1:
         factor_method = st.radio(
-            "因子数量确定方式 (全部问卷通用):",
+            "因子数量确定方式 (通用):",
             ["👆 强制指定统一因子数","🤖 系统自动评估 (碎石图拐点)"],
             horizontal=True
         )
@@ -785,7 +785,7 @@ def render_stage1_efa_clean():
     if st.session_state.batch_n1_results:
         st.markdown("---")
         st.subheader("📥 批量结果确认与指标综合审查面板")
-        st.info("💡 切换下方的问卷标签页（Tabs），可以独立审查、持久化保存状态并【单独下载】每个维度对应的独立 Excel 报告。")
+        st.info("💡 切换下方的问卷标签页（Tabs），可以独立审查并【单独下载】每个维度对应的独立 Excel 报告。")
 
         active_tab_names = list(st.session_state.batch_n1_results.keys())
         tabs = st.tabs(active_tab_names)
@@ -895,7 +895,7 @@ def render_stage1_efa_clean():
                 # ==============================================================
                 # 🚨 【核心升级点 1】：解耦并拆分 复合 Key，将状态稳稳存入 N1_preEFA 缓存
                 # ==============================================================
-                st.markdown("#### 4️⃣ 数据状态持久化与独立导出")
+                st.markdown("#### 4️⃣ 独立导出")
                 
                 # 智能识别当前复合键中包含的「数据集名称」和「Measure名称」
                 # 格式预期: "子数据集A - 心理资本"，如无分隔符则兜底归类
