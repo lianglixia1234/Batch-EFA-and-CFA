@@ -422,14 +422,14 @@ def run_pipeline_streamlit(df, fixed_factors=None, max_iterations=100, whitelist
     iteration = 0
     deleted_items = []
 
-    st.markdown("### 🔄 开始迭代删题流程")
+    st.markdown("### 🔄 开始迭代删题")
     status_container = st.empty() 
     
     item_to_delete = delete_items(loadings_table_avg, current_df, factor_num_final, whitelist=whitelist)
 
     while item_to_delete is not None and iteration < max_iterations:
         if item_to_delete in seen:
-            st.warning(f"⚠️ 检测到重复建议删除 {item_to_delete}，提前停止以避免震荡。")
+            st.warning(f"⚠️ 检测到重复建议删除 {item_to_delete}")
             break
 
         if current_df.shape[1] <= 3:
@@ -539,7 +539,7 @@ def check_residual_normality(df, loadings):
 
 def render_stage1_efa_clean():
     st.subheader("删题EFA分析 (批量模式)")
-    st.caption("系统将自动读取您在数据清洗阶段划分的所有 Measure，并依次执行全样本自动化迭代删题。")
+    st.caption("将自动读取您在数据清洗阶段划分的所有 Measure，并依次执行全样本自动化迭代删题。")
 
     # ==========================================================================
     # 1. 数据来源与 Measure 自动化识别
@@ -640,7 +640,7 @@ def render_stage1_efa_clean():
                     st.success(f"🎯 成功从选中的 **{len(selected_names)}** 个数据集中，精准识别到 **{len(saved_measures_found)}** 个分析维度！")
                     
                     selected_sub_measures = st.multiselect(
-                        "2. 确认要批量运行的【数据集-Measure】组合清单（默认已全选）：",
+                        "2. 确认要批量运行的【数据集-Measure】组合（默认已全选）：",
                         options=list(saved_measures_found.keys()),
                         default=list(saved_measures_found.keys()), # 默认全选，一键多跑！
                         key="sub_batch_final_task_select"
@@ -652,10 +652,10 @@ def render_stage1_efa_clean():
                         
                 else:
                     # 兜底：如果没有划分 Measure，直接把每个选中的数据集整张表作为一个大任务
-                    st.info("💡 将每个子数据集整张表作为独立问卷加入队列。")
+                    st.info("💡 将每个子数据集作为独立问卷加入")
                     for current_dataset_name in selected_names:
                         df_sub = st.session_state.sub_datasets[current_dataset_name]
-                        measures_to_process[f"{current_dataset_name} (全量表)"] = df_sub.copy()
+                        measures_to_process[f"{current_dataset_name} "] = df_sub.copy()
 
     else:
         uploaded_file = st.file_uploader("请上传用于分析的数据文件", type=['xlsx', 'xls', 'csv'])
@@ -750,7 +750,7 @@ def render_stage1_efa_clean():
             try:
                 # 借助原有的主管道函数进行静默删题计算
                 # 利用 st.container 捕获删题历史并在后面进行独立沙盒隔离展示
-                with st.expander(f"⚙️ 查看 [{m_name}] 迭代实时删题细节 (后台日志)", expanded=False):
+                with st.expander(f"⚙️ 查看 [{m_name}] 迭代实时删题细节 ", expanded=False):
                     final_df, final_loadings, kept, deleted, n_factors = run_pipeline_streamlit(
                         df_ready,
                         fixed_factors=manual_k_val,
@@ -774,7 +774,7 @@ def render_stage1_efa_clean():
             
             progress_bar.progress((idx + 1) / len(cleaned_measures_dict))
             
-        status_text.success("🎉 所有问卷维度的自动化批量分析与迭代删题全部完成！请在下方控制台审阅结果。")
+        status_text.success("🎉 所有问卷的自动化批量分析与迭代删题全部完成！请在下方审阅结果。")
         st.session_state.batch_n1_results = batch_results
 
     # ==========================================================================
@@ -784,8 +784,8 @@ def render_stage1_efa_clean():
     # ==========================================================================
     if st.session_state.batch_n1_results:
         st.markdown("---")
-        st.subheader("📥 批量结果确认与指标综合审查面板")
-        st.info("💡 切换下方的问卷标签页（Tabs），可以独立审查并【单独下载】每个维度对应的独立 Excel 报告。")
+        st.subheader("📥 批量结果确认")
+        st.info("💡 切换下方的问卷标签页（Tabs），可以独立审查并单独下载每个维度对应的独立 Excel 报告。")
 
         active_tab_names = list(st.session_state.batch_n1_results.keys())
         tabs = st.tabs(active_tab_names)
@@ -866,7 +866,7 @@ def render_stage1_efa_clean():
 
                 # 5.5 单一量表独立恢复与微调
                 if len(deleted) > 0:
-                    st.markdown("#### 🛠️ 独立微调控制台")
+                    st.markdown("#### 🛠️ 独立微调")
                     items_to_restore = st.multiselect(
                         f"从 [{m_name}] 的已删列表中选择【强制恢复】的题目:",
                         options=deleted,
@@ -902,7 +902,7 @@ def render_stage1_efa_clean():
                 if " - " in m_name:
                     ds_name_extracted, real_measure_id = m_name.split(" - ", 1)
                 else:
-                    ds_name_extracted = "Default_SubDataset"
+                    ds_name_extracted = "preEFA_SubDataset"
                     real_measure_id = m_name
 
                 # 双重校验：判断此前是否已被保存，用于初始化复选框默认勾选状态
@@ -913,7 +913,7 @@ def render_stage1_efa_clean():
 
                 # 审核状态单选框
                 is_confirmed = st.checkbox(
-                    f"💾 确认将量表【{real_measure_id}】的终审题目与结构锁入 `N1_preEFA` 缓存", 
+                    f"💾 确认将量表【{real_measure_id}】的题目存入 `N1_preEFA` 缓存", 
                     value=is_previously_saved,
                     key=f"confirm_check_{m_name}"
                 )
@@ -1011,13 +1011,13 @@ def render_stage1_efa_clean():
         if st.session_state.N1_preEFA:
             st.markdown("---")
             with st.expander("🚀 查看当前准备对接 Batch CFA 的 `N1_preEFA` 全局资产清单", expanded=True):
-                st.success("📊 缓存中已成功登记以下审定结构，后续 CFA（验证性因子分析）模块将直接一键调取这些数据：")
+                st.success("📊 已成功缓存中，后续 preCFA模块将调取这些数据：")
                 
                 for d_key, m_dict in st.session_state.N1_preEFA.items():
                     st.markdown(f"#### 📦 数据集容器: `{d_key}`")
                     for sub_m, config in m_dict.items():
                         st.markdown(
-                            f" * 🟢 **{sub_m}** ── 精炼保留题目: `{len(config['kept_items'])}` 题 | "
+                            f" * 🟢 **{sub_m}** ── 保留题目: `{len(config['kept_items'])}` 题 | "
                             f"推荐 CFA 验证潜变量/因子数: `{config['n_factors']}` | *更新时间: {config['timestamp']}*"
                         )
 
@@ -1093,10 +1093,10 @@ def render_stage2_cfa_clean():
             }
 
     if not sub_datasets:
-        st.error("❌ 无法从上游资产 N1_preEFA 或全局变量中提取到任何有效的子数据集 DataFrame 或题目清单，请检查上游挂载。")
+        st.error("❌ 无法从 N1_preEFA 中提取到任何有效的子数据集或题目清单，请检查")
         return
 
-    st.success(f"📊 成功连通 N1_preEFA 管道！检测到可用于 CFA 验证的资产容器数量: `{len(sub_datasets)}` 个。")
+    st.success(f"📊 检测到可用于 CFA 验证的问卷数量: `{len(sub_datasets)}` 个。")
 
     # ==========================================================================
     # ⚡ 3. 自动化 CFA 模型流式运行引擎
@@ -1113,7 +1113,7 @@ def render_stage2_cfa_clean():
         if df_run is None or df_run.empty or not factor_items:
             continue
             
-        with st.spinner(f"🚀 正在针对【{sub_name}】自动组装并运行单因子验证性因子分析 (CFA)..."):
+        with st.spinner(f"🚀 正在针对【{sub_name}】运行 CFA..."):
             try:
                 from semopy import Model, calc_stats
                 
