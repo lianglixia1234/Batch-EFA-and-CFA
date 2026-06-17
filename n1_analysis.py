@@ -918,7 +918,9 @@ def render_stage1_efa_clean():
                     key=f"confirm_check_{m_name}"
                 )
 
-                # 联动存储与清除逻辑
+                # ==============================================================
+                # 🚀 【承接升级】：联动存储与清除逻辑，同时锁定题目和真实 DataFrame 实体
+                # ==============================================================
                 if is_confirmed:
                     if ds_name_extracted not in st.session_state.N1_preEFA:
                         st.session_state.N1_preEFA[ds_name_extracted] = {}
@@ -927,7 +929,9 @@ def render_stage1_efa_clean():
                     st.session_state.N1_preEFA[ds_name_extracted][real_measure_id] = {
                         "kept_items": list(kept),      # N1 过滤后确认保留的题目
                         "n_factors": int(n_factors),   # N1 模型推荐提取的因子数
-                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        # 🌟【超级核心修复点】：把清洗、删题后的真实 DataFrame 存进资产中，供 CFA 阶段直接提取
+                        "clean_df": df_final          
                     }
                 else:
                     # 用户取消勾选时动态移除
@@ -1043,45 +1047,54 @@ def render_stage2_cfa_clean():
 
 
     # ==========================================================================
-    # 🔗 2. 上游强鲁棒解包层：全面适配两层级联的 N1_preEFA 资产
+    # ==========================================================================
+    # 🔗 2. 上游强鲁棒解包层：完美承接并缝合 EFA 阶段保留的题目与物理 DataFrame
     # ==========================================================================
     n1_asset = st.session_state.get("N1_preEFA")
     if not n1_asset:
-        st.info("💡 暂未检测到 N1_preEFA 登记资产。请确保在前置模块中完成了 N1 阶段的数据集精炼。")
+        st.info("💡 暂未检测到 N1_preEFA 登记资产。请确保在前置模块中完成了 N1_EFA 阶段的数据集精炼并【勾选了确认存储】。")
         return
 
     sub_datasets = {}
     
     if isinstance(n1_asset, dict):
-        # 深度遍历第一层：数据集容器键 (例如："子数据集A")
+        # 深度遍历第一层：数据集容器键 (如："子数据集A" 或 "preEFA_SubDataset")
         for ds_key, measure_dict in n1_asset.items():
             if isinstance(measure_dict, dict):
-                # 深度遍历第二层：真实的 Measure (例如："心理资本")
+                # 深度遍历第二层：真实的 Measure (如："心理资本")
                 for m_id, m_config in measure_dict.items():
                     if isinstance(m_config, dict) and "kept_items" in m_config:
-                        # 构造复合唯一任务键名，供 CFA 阶段展示
+                        
+                        # 构造复合唯一任务键名，例如: "子数据集A - 心理资本"
                         composite_key = f"{ds_key} - {m_id}"
                         
-                        # 核心联动：从系统缓存 sub_datasets 中动态捞出对应的 DataFrame 实体
-                        raw_df_entity = None
-                        if "sub_datasets" in st.session_state and ds_key in st.session_state.sub_datasets:
-                            raw_df_entity = st.session_state.sub_datasets[ds_key]
-                        elif "dc_dataset_full" in st.session_state:
-                            raw_df_entity = st.session_state.dc_dataset_full
-                        else:
-                            raw_df_entity = st.session_state.get("df_source")
+                        # 🌟 缝合核心：优先提取第一阶段打包存进来的物理 clean_df
+                        raw_df_entity = m_config.get("clean_df")
                         
-                        # 封装成 Stage 2 后续 CFA 引擎所渴望的标准数据包格式
+                        # 如果第一阶段历史遗留数据没存 df，启动多重影子追踪进行兜底防护
+                        if raw_df_entity is None:
+                            if "sub_datasets" in st.session_state and ds_key in st.session_state.sub_datasets:
+                                raw_df_entity = st.session_state.sub_datasets[ds_key]
+                            elif "dc_dataset_full" in st.session_state:
+                                raw_df_entity = st.session_state.dc_dataset_full
+                            else:
+                                raw_df_entity = st.session_state.get("df_source")
+                        
+                        # 封装成 Stage 2 后面 CFA 分析引擎急需的标准格式
                         sub_datasets[composite_key] = {
-                            "items": m_config["kept_items"],
-                            "clean_df": raw_df_entity
+                            "items": m_config["kept_items"],  # 自动加载 EFA 删剩下的黄金题目
+                            "clean_df": raw_df_entity,        # 成功捆绑物理 DataFrame 实体
+                            "n_factors": m_config.get("n_factors", 1) # 顺带捎上推荐的因子结构
                         }
 
-    # 如果多层级联没捞到，执行传统单层或兜底防护
+    # 兜底防御：若以上级联完全没捞到，允许遍历一层字典或全局兜底
     if not sub_datasets:
         for k, v in n1_asset.items():
             if isinstance(v, dict) and ("items" in v or "clean_df" in v or "df" in v):
-                sub_datasets[k] = v
+                sub_datasets[k] = {
+                    "items": v.get("items") or v.get("kept_items"),
+                    "clean_df": v.get("clean_df") or v.get("df") or st.session_state.get("df_source")
+                }
 
     if not sub_datasets:
         df_source_backup = st.session_state.get("df_source")
@@ -1091,10 +1104,10 @@ def render_stage2_cfa_clean():
                 "clean_df": df_source_backup
             }
 
-    if not sub_datasets:
-        st.error("❌ 无法从 N1_preEFA 中提取到任何有效的子数据集或题目清单，请检查")
+    # 终审把关：检查数据和题目是否双在线
+    if not sub_datasets or any(v.get("clean_df") is None for v in sub_datasets.values()):
+        st.error("❌ 无法从上游资产 N1_preEFA 提取到有效的子数据集，题目与 DataFrame 缝合失败。")
         return
-
     st.success(f"📊 检测到可用于 CFA 验证的问卷数量: `{len(sub_datasets)}` 个。")
 
     # ==========================================================================
