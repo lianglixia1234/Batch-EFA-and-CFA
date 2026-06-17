@@ -1106,8 +1106,24 @@ def render_stage2_cfa_clean():
         if sub_name in st.session_state.cfa_multi_scenarios:
             continue
             
-        df_run = asset_body.get("clean_df") or asset_body.get("df") or st.session_state.get("df_source")
-        factor_items = asset_body.get("items") or asset_body.get("chosen_items")
+
+        # 🛡️ 安全分步提取 DataFrame，彻底规避布尔连断 or 崩溃
+        df_run = asset_body.get("clean_df")
+        if df_run is None:
+            df_run = asset_body.get("df")
+        if df_run is None:
+            df_run = st.session_state.get("df_source")
+            
+        # 🛡️ 安全分步提取题项
+        factor_items = asset_body.get("items")
+        if factor_items is None:
+            factor_items = asset_body.get("chosen_items")
+
+
+
+
+
+        
         n_factors_target = asset_body.get("n_factors", 2)
         
         if df_run is None or df_run.empty or not factor_items:
