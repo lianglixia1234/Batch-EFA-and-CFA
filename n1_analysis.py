@@ -991,7 +991,7 @@ def render_stage1_efa_clean():
                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                             "clean_df": df_final          # 清洗删题后的真实 DataFrame
                         }
-                        st.toast(f"🟢 已成功将【{final_measure_id}】同步至全局资产缓存！")
+                        st.toast(f"🟢 已成功将【{final_measure_id}】同步缓存！")
 
                         # 2. 编译并输出 Excel 下载组件
                         single_buf = io.BytesIO()
