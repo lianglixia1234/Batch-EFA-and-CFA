@@ -996,7 +996,7 @@ def render_stage1_efa_clean():
                     today_str = date.today().strftime("%Y-%m-%d")
                     user_name = st.session_state.get("user_name", "user")
                     safe_measure_id = "".join(c for c in real_measure_id if c not in '[]:*?/\\ ')
-                    file_filename = f"EFA_Report_{measure_id}_{today_str}.xlsx"
+                    file_filename = f"EFA_Report_{safe_measure_id}_{today_str}.xlsx"
                     
                     # 输出独立的下载组件
                     st.download_button(
