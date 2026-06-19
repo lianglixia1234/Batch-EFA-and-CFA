@@ -1738,14 +1738,35 @@ def render_stage2_cfa_clean():
                         st.markdown("**生成的模型语法 (Syntax Used):**")
                         st.code(st.session_state[f"n2_syntax_{sub_name}"], language="text")
 
+            
+
                     # ==============================================================================
-                    # 📌 变量映射映射：从 session_state 动态恢复当前量表所需变量（解决未定义问题）
+                    # 📌 变量映射：动态恢复与提取当前量表最后留下来的具体题目
                     # ==============================================================================
-                    current_df_cfa = st.session_state.get(f"n2_cleaned_df_{sub_name}") # 确保你上游存了这个
-                    current_factor_items = trace_logs[-1]['items'] if trace_logs else [] # 从删题日志最后一轮自动获取保留题目
+                    current_df_cfa = st.session_state.get(f"n2_cleaned_df_{sub_name}") 
                     current_estimates = est_df
                     current_fit_stats = stats_dict
                     current_factor_name = fname
+
+                    # ---- 🎯 精确提取最后留下来的具体题目列表 ----
+                    # 筛选出 op 为 '=~' 且左侧为主因子名称的行，其右侧（RHS）就是最终保留的题项
+                    if current_estimates is not None and not current_estimates.empty:
+                        # 确保不把方法因子（mname）或其他不相干的潜变量载荷算进来
+                        final_loading_rows = current_estimates[
+                            (current_estimates['op'] == '=~') & 
+                            (current_estimates['LHS'] == current_factor_name)
+                        ]
+                        # 提取具体的题目名称并去重
+                        current_factor_items = final_loading_rows['RHS'].unique().tolist()
+                    else:
+                        current_factor_items = []
+
+                    # ---- 💡 极端情况下的安全兜底 ----
+                    if not current_factor_items and current_df_cfa is not None:
+                        current_factor_items = list(current_df_cfa.columns)
+
+
+                    
 
                     # ==============================================================================
                     # --- 5. 生成可下载报告与数据同步 (移入循环内部，放入 corresponding tab) ---
