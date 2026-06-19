@@ -1,6 +1,7 @@
 import streamlit as st
 from data_cleaning import render_data_cleaning
 from n1_analysis import render_n1_analysis
+from n2_analysis import render_n2_analysis
 
 st.set_page_config(layout="wide")
 
