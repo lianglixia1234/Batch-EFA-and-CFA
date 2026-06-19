@@ -1451,6 +1451,7 @@ def render_stage2_cfa_clean():
     
 
 
+
     # --- 3. 模型拟合 (多量表独立 Tab 呈现 - 自动纯化删题版) ---
     st.markdown("---")
     run_all_clicked = st.button("🚀 开始运行 所有量表自动删题CFA 分析", type="primary", key="run_all_cfa_global_btn")
@@ -1464,7 +1465,7 @@ def render_stage2_cfa_clean():
             if k.startswith("n2_") and not k.endswith("_btn"):
                 del st.session_state[k]
         
-        # 🔄 修改 3：遍历所有选中的量表进行批量离线计算 (由 all_measures 更换为 active_measure_ids)
+        # 🔄 修改 3：遍历所有选中的量表进行批量离线计算
         for sub_name in active_measure_ids:
             factor_items = st.session_state.get(f"factor_items_{sub_name}", [])
             method_items = st.session_state.get(f"method_items_{sub_name}", [])
@@ -1472,7 +1473,6 @@ def render_stage2_cfa_clean():
             method_name = st.session_state.get(f"method_name_{sub_name}", "Method")
             
             if not factor_items:
-                # 兜底：如果动态变量中没取到，直接从上游缓存就绪队列中抓取用户当前选择
                 if "cfa_ready_queue" in locals() and sub_name in cfa_ready_queue:
                     factor_items = cfa_ready_queue[sub_name]["factor_items"]
                     method_items = cfa_ready_queue[sub_name]["method_items"]
@@ -1507,47 +1507,80 @@ def render_stage2_cfa_clean():
                 name_mapping = {item: f"v{idx + 1}" for idx, item in enumerate(unique_all_items)}
                 reverse_mapping = {f"v{idx + 1}": item for idx, item in enumerate(unique_all_items)}
                     
-                # 🌟 【核心修复点】：提取干净的子集，只把当前量表涉及的列重命名并送入模型，彻底解决 missing 报错
+                # 提取子集并执行清洗
                 df_subset = df_numeric[[c for c in unique_all_items if c in df_numeric.columns]].copy()
-                df_numeric_encoded = df_subset.rename(columns=name_mapping)
-                    
+                df_numeric_clean = df_subset.dropna(axis=0)
+                
+                if len(df_numeric_clean) < 10:
+                    if current_step == 1:
+                        final_err_msg = f"数据清理后无有效样本（有效行数: {len(df_numeric_clean)}），请检查原始数据。"
+                    else:
+                        trace_logs.append({
+                            "round": current_step, "items_count": len(active_factor_items),
+                            "cfi": cfi_val, "tli": tli_val,
+                            "action": "⚠️ 因样本不足自动锁定上一轮最佳成果", "deleted_item": "无"
+                        })
+                    break
+                
+                df_numeric_encoded = df_numeric_clean.rename(columns=name_mapping)
                 encoded_factor_items = [name_mapping[x] for x in active_factor_items]
                 encoded_method_items = [name_mapping[x] for x in active_method_items] if active_method_items else []
                     
                 result, err_msg, syntax_used = run_cfa_gui(
-                    df_numeric_encoded, 
-                    factor_name, 
-                    encoded_factor_items, 
-                    method_name, 
-                    encoded_method_items
+                    df_numeric_encoded, factor_name, encoded_factor_items, method_name, encoded_method_items
                 )
                     
                 if err_msg:
+                    if final_result is not None:
+                        trace_logs.append({
+                            "round": current_step, "items_count": len(active_factor_items),
+                            "cfi": cfi_val, "tli": tli_val,
+                            "action": f"⚠️ 拟合遇阻 ({err_msg})，自动锁定上一轮模型成果", "deleted_item": "无"
+                        })
+                        break
                     final_err_msg = err_msg
-                    final_syntax_used = syntax_used
-                    st.session_state[f"n2_err_msg_{sub_name}"] = err_msg
-                    st.session_state[f"n2_success_{sub_name}"] = False
                     break
                     
                 model_obj, estimates_raw, fit_stats = result
                 
-                try: cfi_val = float(fit_stats.get("CFI", 0.0) if isinstance(fit_stats, dict) else fit_stats.loc[fit_stats['Metric'] == 'CFI', 'Value'].values[0])
-                except: cfi_val = 0.0
-                try: tli_val = float(fit_stats.get("TLI", 0.0) if isinstance(fit_stats, dict) else fit_stats.loc[fit_stats['Metric'] == 'TLI', 'Value'].values[0])
-                except: tli_val = 0.0
-                    
+                # 🌟【超级兼容性修复点】：多策略精准解析 CFI 和 TLI，防止误判为 0.0
+                cfi_val, tli_val = 0.0, 0.0
+                if isinstance(fit_stats, dict):
+                    cfi_val = float(fit_stats.get("CFI", fit_stats.get("cfi", 0.0)))
+                    tli_val = float(fit_stats.get("TLI", fit_stats.get("tli", 0.0)))
+                elif isinstance(fit_stats, pd.DataFrame):
+                    # 尝试匹配各种可能的列名组合
+                    for col_name in fit_stats.columns:
+                        if fit_stats[col_name].dtype == object:
+                            cfi_rows = fit_stats[fit_stats[col_name].astype(str).str.upper() == 'CFI']
+                            tli_rows = fit_stats[fit_stats[col_name].astype(str).str.upper() == 'TLI']
+                            if not cfi_rows.empty:
+                                val_cols = [c for c in fit_stats.columns if c != col_name]
+                                try: cfi_val = float(cfi_rows[val_cols[0]].values[0])
+                                except: pass
+                            if not tli_rows.empty:
+                                val_cols = [c for c in fit_stats.columns if c != col_name]
+                                try: tli_val = float(tli_rows[val_cols[0]].values[0])
+                                except: pass
+                elif hasattr(fit_stats, 'get'):
+                    try:
+                        cfi_val = float(fit_stats['CFI'])
+                        tli_val = float(fit_stats['TLI'])
+                    except: pass
+
                 final_result = result
                 final_syntax_used = syntax_used
                 final_name_mapping = name_mapping
                 final_reverse_mapping = reverse_mapping
                     
+                # 如果第一轮（或后续轮次）就已经达标，写好日志，直接断开循环输出！
                 if cfi_val >= 0.90 and tli_val >= 0.90:
                     trace_logs.append({
                         "round": current_step,
                         "items_count": len(active_factor_items),
                         "cfi": cfi_val,
                         "tli": tli_val,
-                        "action": "✨ 模型拟合指标成功达标（CFI与TLI均 >= 0.90），自动纯化圆满结束！",
+                        "action": "✨ 首轮即完美达标！无需做任何删题修正，圆满结束！" if current_step == 1 else "✨ 模型拟合指标成功达标，自动纯化圆满结束！",
                         "deleted_item": "无"
                     })
                     break
@@ -1564,10 +1597,8 @@ def render_stage2_cfa_clean():
                     worst_raw_item = reverse_mapping.get(worst_encoded_item, worst_encoded_item)
                     
                     trace_logs.append({
-                        "round": current_step,
-                        "items_count": len(active_factor_items),
-                        "cfi": cfi_val,
-                        "tli": tli_val,
+                        "round": current_step, "items_count": len(active_factor_items),
+                        "cfi": cfi_val, "tli": tli_val,
                         "action": f"❌ 拟合未达标(CFI:{cfi_val:.3f}, TLI:{tli_val:.3f})，执行删题",
                         "deleted_item": worst_raw_item
                     })
@@ -1577,12 +1608,9 @@ def render_stage2_cfa_clean():
                         active_method_items.remove(worst_raw_item)
                 else:
                     trace_logs.append({
-                        "round": current_step,
-                        "items_count": len(active_factor_items),
-                        "cfi": cfi_val,
-                        "tli": tli_val,
-                        "action": "⚠️ 未能捕获到有效的主载荷路径，强行终止自动清洗",
-                        "deleted_item": "未知"
+                        "round": current_step, "items_count": len(active_factor_items),
+                        "cfi": cfi_val, "tli": tli_val,
+                        "action": "⚠️ 未能捕获到有效的主载荷路径，终止", "deleted_item": "未知"
                     })
                     break
                         
@@ -1591,6 +1619,8 @@ def render_stage2_cfa_clean():
             status_holder.empty()
                 
             if final_err_msg:
+                st.session_state[f"n2_err_msg_{sub_name}"] = final_err_msg
+                st.session_state[f"n2_success_{sub_name}"] = False
                 st.error(f"❌【{sub_name}】运行报错：{final_err_msg}")
             elif final_result:
                 model_obj, estimates_raw, fit_stats = final_result
@@ -1618,16 +1648,6 @@ def render_stage2_cfa_clean():
                 st.session_state[f"n2_df_cfa_{sub_name}"] = df_cfa_used
                 st.session_state[f"n2_factor_items_{sub_name}"] = list(active_factor_items)
                 st.session_state[f"n2_method_items_{sub_name}"] = list(active_method_items)
-                
-                # 兼容性全局指针保留
-                st.session_state.n2_estimates = estimates
-                st.session_state.n2_fit_stats = fit_stats
-                st.session_state.n2_syntax = syntax_decoded
-                st.session_state.n2_factor_name = factor_name
-                st.session_state.n2_method_name = method_name
-                st.session_state.n2_df_cfa = df_cfa_used
-                st.session_state.n2_factor_items = list(active_factor_items)
-                st.session_state.n2_method_items = list(active_method_items)
     
         global_status.success("🎉 所有量表的自动纯化删题计算已全部批量完成！请在下方 Tab 中查看不同 Measure 的报告。")
         
@@ -1653,29 +1673,32 @@ def render_stage2_cfa_clean():
                         log_records.append({
                             "轮次": f"第 {log['round']} 轮",
                             "当前保留题数": f"{log['items_count']} 题",
-                            "CFI 拟合度": f"{log['cfi']:.3f}",
-                            "TLI 拟合度": f"{log['tli']:.3f}",
+                            "CFI 拟合度": f"{log['cfi']:.3f}" if isinstance(log['cfi'], (int, float)) else "N/A",
+                            "TLI 拟合度": f"{log['tli']:.3f}" if isinstance(log['tli'], (int, float)) else "N/A",
                             "剔除题目": log['deleted_item']
                         })
                     st.table(pd.DataFrame(log_records))
                     
-                    # 2. 🏆 关键模型拟合指标看板 (Top 8 Highlight)
+                    # 2. 🏆 关键模型拟合指标看板
                     st.markdown("###### 🏆 关键模型拟合指标")
                     stats_dict = st.session_state[f"n2_fit_stats_{sub_name}"]
                     
                     def get_val(key):
                         if isinstance(stats_dict, dict):
-                            val = stats_dict.get(key, np.nan)
-                        elif isinstance(stats_dict, pd.DataFrame) and 'Metric' in stats_dict.columns:
-                            try: val = stats_dict.loc[stats_dict['Metric'] == key, 'Value'].values[0]
-                            except: val = np.nan
-                        else:
-                            val = np.nan
-                        return val if isinstance(val, (int, float)) else np.nan
+                            return stats_dict.get(key, np.nan)
+                        elif isinstance(stats_dict, pd.DataFrame):
+                            for col in stats_dict.columns:
+                                if stats_dict[col].dtype == object:
+                                    r = stats_dict[stats_dict[col].astype(str).str.upper() == key.upper()]
+                                    if not r.empty:
+                                        vc = [c for c in stats_dict.columns if c != col]
+                                        try: return float(r[vc[0]].values[0])
+                                        except: pass
+                        return np.nan
     
                     metrics = {
                         "CFI": get_val("CFI"), "TLI": get_val("TLI"), "RMSEA": get_val("RMSEA"), "SRMSR": get_val("SRMR"),
-                        "Chi-Square (User Model)": get_val("chi2"), "AIC": get_val("AIC"), "BIC": get_val("BIC"), "SABIC": get_val("SABIC")
+                        "Chi-Square": get_val("chi2"), "AIC": get_val("AIC"), "BIC": get_val("BIC"), "SABIC": get_val("SABIC")
                     }
     
                     m_cols1 = st.columns(4)
@@ -1686,7 +1709,7 @@ def render_stage2_cfa_clean():
     
                     st.markdown("") 
                     m_cols2 = st.columns(4)
-                    keys2 = ["Chi-Square (User Model)", "AIC", "BIC", "SABIC"] 
+                    keys2 = ["Chi-Square", "AIC", "BIC", "SABIC"] 
                     for i, k in enumerate(keys2):
                         val = metrics[k]
                         m_cols2[i].metric(label=k, value=f"{val:.3f}" if not np.isnan(val) else "N/A")
@@ -1760,7 +1783,6 @@ def render_stage2_cfa_clean():
                     st.info(f"💡 量表【{sub_name}】目前暂无有效模型成果。原因：{err_reason}")
     else:
         st.warning("⚠️ 暂无有效的量表可进行报告查看。")
-
 
     
     
