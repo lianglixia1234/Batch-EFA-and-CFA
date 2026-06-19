@@ -14,6 +14,7 @@ from utils import smart_multiselect, parse_item_col, sort_item_cols_by_number
 import re
 import io
 from datetime import date
+from single_factor_CFA import run_cfa_gui
 
 
 # ==============================================================================
@@ -1155,10 +1156,10 @@ def render_stage2_cfa_clean():
             
             audit_col1, audit_col2 = st.columns(2)
             with audit_col1:
-                st.markdown(f"**🅰️ 主因子特质项 (`{sub_name}_Trait`)** ── 📊 当前包含 `{trait_count}` 题")
+                st.markdown(f"**🅰️ 主因子特质项 (`{sub_name}`)** ── 📊 当前包含 `{trait_count}` 题")
                 st.code("\n".join([f" ├─ {item}" for item in sorted_items]), language="text")
             with audit_col2:
-                st.markdown(f"**🅱️ 逆向方法因子项 (`{sub_name}_Method`)** ── 📊 当前包含 `{method_count}` 题")
+                st.markdown(f"**🅱️ 逆向方法因子项 (`Method`)** ── 📊 当前包含 `{method_count}` 题")
                 if confirmed_method_items:
                     st.code("\n".join([f" ├─ {item}" for item in confirmed_method_items]), language="text")
                 else:
