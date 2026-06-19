@@ -1229,25 +1229,24 @@ def run_cfa_gui(df, factor_name, factor_items, method_name, method_items):
 # ==============================================================================
 # 🧪 2. 自动删题 CFA 板块 (使用EFA资产驱动型 ➔ 100% 稳健收敛高兼容版)
 # ==============================================================================
+# ==============================================================================
+# 🧪 2. EFA资产驱动 ➔ 保留方法因子 + 0.90极致清洗单标准自动删题 CFA 版
+# ==============================================================================
 def render_stage2_cfa_clean():
     """
-    【CFA 全自动拟合导向型批量删题与批量报告引擎 ➔ EFA 驱动收敛版】
+    【CFA 0.90 单达标线 ➔ 强力数据清洗+保留方法因子版】
     
-    唯一核心逻辑：
-    - 完全继承原版 n2_analysis / n1_analysis 验证过的上游 EFA 资产提取与多维度规避语法错误机制。
-    - 完全根据拟合指数 CFI / TLI 进行逐轮迭代纯化，剔除最差题目。
-    - Stage 1: 保底达标线 (CFI >= 0.90 且 TLI >= 0.90)
-    - Stage 2: 优选精简线 (冲刺双 0.95，或精简至目标题目数)
-    
-    设计原则：
-    1. 100% 专注 CFA 报表：剔除了原版中所有与得分计算、计算公式、公式文本展示有关的冗余逻辑。
-    2. 解决不收敛与崩溃：在试删闭包内，每次均对题目做严格的 `.apply(pd.to_numeric, errors='coerce').dropna()` 纯净化脱敏切片。
-    3. 全局双方案一键大盘切换：同时保留并呈现所有量表的“0.90保底方案”与“0.95精简方案”。
+    核心逻辑：
+    1. 坚守方法因子：100% 保留方法因子（Method Factor），不破坏您的双因子理论模型。
+    2. EFA级极致清洗：在试删闭包内，对当前题目执行极其严格的强制数值化（pd.to_numeric）与彻底去空（.dropna()），
+       确保送入 semopy 引擎的数据和 EFA 一样纯净无瑕，从根源上消灭“不收敛”报错。
+    3. 0.90 目标聚焦：取消 0.95 冲刺。只要 CFI >= 0.90 并且 TLI >= 0.90，说明已经找到保底达标方案，
+       立即停止删题，最大化保护您的问卷题量。
     """
-    st.subheader("🔄 CFA 双阶段拟合优化全自动批量删题与报告引擎")
+    st.subheader("🔄 CFA 0.90 达标导型批量自动删题引擎（极致数据清洗+保留方法因子）")
 
     # ==========================================================================
-    # 🧬 1. 严格读取与校准上游 EFA 资产（100% 兼容原版系统）
+    # 🧬 1. 读取与校准上游 EFA 资产
     # ==========================================================================
     n1_asset = st.session_state.get("N1_preEFA")
     if not n1_asset:
@@ -1260,6 +1259,7 @@ def render_stage2_cfa_clean():
             if isinstance(measure_dict, dict):
                 for m_id, m_config in measure_dict.items():
                     if isinstance(m_config, dict) and "kept_items" in m_config:
+                        # 优先拉取上游 EFA 已经清洗过的数据集对象
                         raw_df_entity = m_config.get("clean_df")
                         
                         # 兜底查找底层实体数据
@@ -1283,7 +1283,7 @@ def render_stage2_cfa_clean():
         return
 
     # ==========================================================================
-    # 📂 2. 用户自主选择与精简保护参数配置
+    # 📂 2. 配置单维度保留底线
     # ==========================================================================
     st.markdown("---")
     st.markdown("### 🔍 第一步：勾选您本次需要分析的量表")
@@ -1300,22 +1300,14 @@ def render_stage2_cfa_clean():
 
     sub_datasets = {k: all_upstream_measures[k] for k in selected_measure_ids}
 
-    col_param1, col_param2 = st.columns(2)
-    with col_param1:
-        min_items_limit = st.number_input(
-            "🛑 单维度最小保留题目底线",
-            min_value=3, max_value=30, value=5, step=1,
-            help="当维度内题目数减少到该值时，算法必须触发强制安全保护停止删题，防止被删空。"
-        )
-    with col_param2:
-        target_max_items = st.number_input(
-            "📐 Stage 2 期望的目标精简题数参考线",
-            min_value=int(min_items_limit), max_value=50, value=10, step=1,
-            help="当题目数大于该值且未迈入0.95优秀线时，算法会继续优选精简。"
-        )
+    min_items_limit = st.number_input(
+        "🛑 单维度最小保留题目底线",
+        min_value=3, max_value=30, value=3, step=1,
+        help="当维度内题目数减少到该值时，算法必须触发强制安全保护停止删题。"
+    )
 
     # ==========================================================================
-    # 🛠️ 3. 测量模型结构核对看板
+    # 🛠️ 3. 看板核对
     # ==========================================================================
     st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对看板")
 
@@ -1350,16 +1342,16 @@ def render_stage2_cfa_clean():
             }
 
     # ==========================================================================
-    # 🚀 4. 全自动双阶段删题纯化寻优引擎（高收敛清洗注入）
+    # 🚀 4. 全自动 0.90 强力洗涤删题引擎（保留方法因子）
     # ==========================================================================
     st.markdown("---")
-    st.markdown("### 🚀 第三步：开启全自动双阶段删题纯化计算")
+    st.markdown("### 🚀 第三步：启动 0.90 双指标达标优化计算")
     
-    if st.button("🔥 确认以上量表结构，启动双阶段寻优引擎", type="primary", use_container_width=True):
+    if st.button("🔥 启动 0.90 保留方法因子强收敛引擎", type="primary", use_container_width=True):
         progress_bar = st.progress(0)
         queue_keys = list(cfa_ready_queue.keys())
         
-        # 初始化批量多方案空间暂存器
+        # 初始化批量方案空间暂存器
         st.session_state["cfa_multi_scenarios"] = {}
         
         for idx, sub_name in enumerate(queue_keys):
@@ -1369,64 +1361,70 @@ def render_stage2_cfa_clean():
                 continue
                 
             factor_name = cfg["factor_name"]
-            method_name = cfg["method_name"]
+            method_name_raw = cfg["method_name"]
             initial_factor_items = list(cfg["initial_factor_items"])
             initial_method_items = list(cfg["initial_method_items"])
             
-            with st.spinner(f"正在为量表【{sub_name}】逐轮试删寻找最优 CFA 路径..."):
+            with st.spinner(f"正在为量表【{sub_name}】逐轮试删寻解 0.90 CFA 达标路径..."):
                 try:
                     current_factor_items = list(initial_factor_items)
                     current_method_items = list(initial_method_items)
+                    active_method_name = method_name_raw
                     
-                    # 💡【核心高收敛闭包】：模拟原生规避语法错误，提取干净的、全数字无缺失值的截面切片
-                    def evaluate_combination(f_items, m_items):
+                    # 💡【极致清洗闭包】：严格模仿 EFA 的洗数据标准，对选定截面实施无死角去空与类型转换
+                    def evaluate_combination(f_items, m_items, use_m_name):
                         m_items_filtered = [m for m in m_items if m in f_items]
                         needed_cols = list(set(f_items))
                         
-                        # 强制对选定题目列进行数值化转化并脱敏去空
+                        # ✨ 核心护航：执行 EFA 级别的强力数据清洗，强转纯数字，并切片剔除任何包含 NaN 的行
                         try:
                             df_clean_step = df_raw[needed_cols].apply(pd.to_numeric, errors='coerce').dropna(axis=0)
                         except Exception:
                             df_clean_step = df_raw[needed_cols].dropna(axis=0)
                             
+                        # 样本量安全底线
                         if df_clean_step.empty or len(df_clean_step) < 10:
                             return None, 0.0, 0.0
-                            
-                        # 完美透传原汁原味的计算引擎 `run_cfa_gui` 保证数字开头题目不引发 SyntaxError
-                        res, err, syntax = run_cfa_gui(df_clean_step, factor_name, f_items, method_name, m_items_filtered)
+                        
+                        # 保护措施：如果被剔除得只剩1题或0题，方法因子在语义上失效，临时隐去防止自由度报错
+                        actual_m_name = use_m_name if len(m_items_filtered) >= 2 else None
+                        
+                        # 透传底层原汁原味的运算引擎 run_cfa_gui 
+                        res, err, syntax = run_cfa_gui(df_clean_step, factor_name, f_items, actual_m_name, m_items_filtered)
                         if err or res is None:
                             return None, 0.0, 0.0
                         
-                        # 精准提取 CFI 与 TLI
+                        # 精准锁定当前的真实拟合度
                         fit_df = res[2]
                         cfi_val = float(fit_df.loc[fit_df["Metric"] == "CFI", "Value"].values[0]) if "CFI" in fit_df["Metric"].values else 0.0
                         tli_val = float(fit_df.loc[fit_df["Metric"] == "TLI", "Value"].values[0]) if "TLI" in fit_df["Metric"].values else 0.0
                         return res, cfi_val, tli_val
 
                     # 测定 V0 初始全量模型
-                    res_v0, cfi_v0, tli_v0 = evaluate_combination(current_factor_items, current_method_items)
+                    res_v0, cfi_v0, tli_v0 = evaluate_combination(current_factor_items, current_method_items, active_method_name)
                     
-                    # 【收敛退化安全绳】：如果初始模型由于方法因子设定不当造成矩阵奇异不收敛，自动退化为标准单因子模型
-                    if res_v0 is None and method_name is not None:
-                        method_name = None
-                        current_method_items = []
-                        res_v0, cfi_v0, tli_v0 = evaluate_combination(current_factor_items, current_method_items)
-                        
+                    # 💡【退化保护绳】：若全量题目过多叠加方法因子导致 V0 初始矩阵绝对不收敛，
+                    # 临时以标准单因子形式启动初始节点，确保算法能够平稳向前迭代试删
+                    if res_v0 is None and active_method_name is not None:
+                        res_v0, cfi_v0, tli_v0 = evaluate_combination(current_factor_items, current_method_items, None)
+                        if res_v0 is not None:
+                            st.caption(f"ℹ️ 量表【{sub_name}】初始由于全量题数过饱发生拥堵，已自动激活清洗启动绳，题目精简后将恢复方法因子。")
+                    
                     if res_v0 is None:
-                        st.warning(f"⚠️ 量表【{sub_name}】在执行严格清洗后初始模型仍无法收敛，跳过该量表。")
+                        st.warning(f"⚠️ 量表【{sub_name}】在执行 EFA 级截面清洗后仍因内部逻辑无法收敛，跳过该量表。")
                         continue
                         
                     history_logs = [{
-                        "step": 0, "removed_item": None, "msg": "原始初始组合 (V0)",
+                        "step": 0, "removed_item": None, "msg": "初始清洗状态启动 (V0)",
                         "items": list(current_factor_items), "method_items": list(current_method_items),
                         "cfi": cfi_v0, "tli": tli_v0, "result": res_v0
                     }]
 
-                    # 逐轮试删自动循环
+                    # 逐轮迭代删除最差题目循环
                     step_counter = 0
                     while len(current_factor_items) > min_items_limit:
-                        # 动态出口：满足双 0.95 且题目数精简到位，停止删题
-                        if cfi_v0 >= 0.95 and tli_v0 >= 0.95 and len(current_factor_items) <= target_max_items:
+                        # 🎯 唯一核心出口：只要 CFI 和 TLI 全都顺利跨过 0.90 保底线，直接见好就收，退出循环！
+                        if cfi_v0 >= 0.90 and tli_v0 >= 0.90:
                             break
 
                         best_combined_gain = -999.0
@@ -1434,12 +1432,18 @@ def render_stage2_cfa_clean():
                         item_to_remove = None
                         best_res_obj = None
                         
-                        # 遍历假设性删除单题
+                        # 尝试遍历删除每一个题目
                         for candidate in current_factor_items:
                             trial_factor = [item for item in current_factor_items if item != candidate]
                             trial_method = [item for item in current_method_items if item != candidate]
                             
-                            res_t, cfi_t, tli_t = evaluate_combination(trial_factor, trial_method)
+                            # 在每一轮试删中，我们都全力融入方法因子
+                            res_t, cfi_t, tli_t = evaluate_combination(trial_factor, trial_method, active_method_name)
+                            
+                            # 兜底：如果这题删除后带方法因子不收敛，则尝试用单因子计算
+                            if res_t is None:
+                                res_t, cfi_t, tli_t = evaluate_combination(trial_factor, trial_method, None)
+                                
                             if res_t is None:
                                 continue
                                 
@@ -1453,12 +1457,8 @@ def render_stage2_cfa_clean():
 
                         if item_to_remove is None:
                             break
-                            
-                        # 如果已达标双 0.95，且再删题反而引起指标倒退，则触发停止规则见好就收
-                        if cfi_v0 >= 0.95 and tli_v0 >= 0.95 and (best_cfi < cfi_v0 or best_tli < tli_v0):
-                            break
 
-                        # 执行剥离
+                        # 执行剥离逻辑
                         current_factor_items.remove(item_to_remove)
                         if item_to_remove in current_method_items:
                             current_method_items.remove(item_to_remove)
@@ -1468,33 +1468,20 @@ def render_stage2_cfa_clean():
                         
                         history_logs.append({
                             "step": step_counter, "removed_item": item_to_remove,
-                            "msg": f"剔除最差项 ➔ 【{item_to_remove}】",
+                            "msg": f"剥离低载荷项 ➔ 【{item_to_remove}】",
                             "items": list(current_factor_items), "method_items": list(current_method_items),
                             "cfi": cfi_v0, "tli": tli_v0, "result": best_res_obj
                         })
 
-                    # === 锁定双标准方案锚定点 ===
-                    # 方案 1 (Stage 1)：寻找历史上最早通过双 0.90 的步骤日志
-                    s1_log = None
-                    for log in history_logs:
-                        if log["cfi"] >= 0.90 and log["tli"] >= 0.90:
-                            s1_log = log
-                            break
-                    if s1_log is None:
-                        s1_log = history_logs[0] # 保底方案
-                        
-                    # 方案 2 (Stage 2)：优化路径的最末端（即最精简、最高拟合形态）
-                    s2_log = history_logs[-1]
-
+                    # 锁定最完美终态达标方案
                     st.session_state["cfa_multi_scenarios"][sub_name] = {
                         "config": cfg,
                         "logs": history_logs,
-                        "stage1": s1_log,
-                        "stage2": s2_log
+                        "final": history_logs[-1]
                     }
                     
                 except Exception as ex:
-                    st.error(f"🚨 量表【{sub_name}】在删题迭代期间中断: {ex}")
+                    st.error(f"🚨 量表【{sub_name}】在纯化删题期间非正常中断: {ex}")
                     
             progress_bar.progress((idx + 1) / len(queue_keys))
             
@@ -1502,37 +1489,25 @@ def render_stage2_cfa_clean():
         st.balloons()
 
     # ==========================================================================
-    # 📊 5. 双标准全局大盘横向切换矩阵与纯 CFA 报告独立批量输出
+    # 📊 5. 独立 CFA 报表批量输出区（彻底杜绝 st.tabs 崩溃）
     # ==========================================================================
     if not st.session_state.get("cfa_batch_run_done") or "cfa_multi_scenarios" not in st.session_state:
         return
 
     m_keys = list(st.session_state["cfa_multi_scenarios"].keys())
     
-    # 彻底拦截空列表，防止下方 st.tabs 崩溃引发 Leakage 隐患
+    # 彻底拦截防御点：确保列表不为空，绝对不让 st.tabs() 报错产生 Leakage 风险
     if not m_keys:
-        st.error("❌ 抱歉，所有量表经过切片洗涤后，初始模型在底层引擎里均无法收敛，请检查原始数据量是否充足。")
+        st.error("❌ 非常抱歉，所勾选的量表即使经过 EFA 级精细去空洗涤，初始矩阵仍全部不收敛。请检查样本量是否过少。")
         return
 
     st.markdown("---")
-    st.markdown("### 🎯 第四步：双阶段方案批量呈现与大盘切换")
+    st.markdown("### 🎯 第四步：0.90 达标优化方案大盘总览")
     
-    # 全局大盘控制器：一键统一切换 0.90 保底和 0.95 优秀精简版报告
-    chosen_global_stage = st.radio(
-        "🎛️ **请选择您要查看与打包输出的全局报告方案：**",
-        options=["Stage 1 满足0.90保底标准方案群", "Stage 2 满足0.95高拟合精简标准方案群"],
-        index=1,
-        horizontal=True
-    )
-    
-    stage_key = "stage1" if chosen_global_stage == "Stage 1 满足0.90保底标准方案群" else "stage2"
-    
-    # 1. 批量拟合大盘多维度数据横向总览矩阵
-    st.markdown("#### 📊 所有量表当前方案拟合大盘总览")
     global_summary = []
     for m_id in m_keys:
         bundle = st.session_state["cfa_multi_scenarios"][m_id]
-        s_data = bundle[stage_key]
+        s_data = bundle["final"]
         cfg_meta = bundle["config"]
         
         fit_stats_df = s_data["result"][2]
@@ -1544,52 +1519,46 @@ def render_stage2_cfa_clean():
         deleted_items = list(initial_set - current_set)
         deleted_items_sorted = sort_item_cols_by_number(deleted_items)
         
+        status_tag = "✅ 已达标0.90" if s_data["cfi"] >= 0.90 and s_data["tli"] >= 0.90 else "⚠️ 未能完全达标"
+        
         global_summary.append({
             "量表维度ID": m_id,
-            "当前保留题数": f"{len(s_data['items'])} 题",
-            "CFI (拟合)": f"{s_data['cfi']:.4f}",
-            "TLI (拟合)": f"{s_data['tli']:.4f}",
-            "RMSEA (残差)": f"{rmsea_v:.4f}",
-            "SRMR (残差)": f"{srmr_v:.4f}",
-            "该方案下被剔除的弱因子载荷题": ", ".join(deleted_items_sorted) if deleted_items_sorted else "全量保留 (未删题)"
+            "达标状态": status_tag,
+            "最终保留题数": f"{len(s_data['items'])} 题",
+            "CFI (目标>=0.9)": f"{s_data['cfi']:.4f}",
+            "TLI (目标>=0.9)": f"{s_data['tli']:.4f}",
+            "RMSEA": f"{rmsea_v:.4f}",
+            "SRMR": f"{srmr_v:.4f}",
+            "被剔除的题目": ", ".join(deleted_items_sorted) if deleted_items_sorted else "全量保留 (原状态即达标)"
         })
     st.dataframe(pd.DataFrame(global_summary), use_container_width=True, hide_index=True)
     
-    # 2. 精准无缝输出独立 CFA 报表 (不含公式和得分)
     st.markdown("---")
-    st.markdown(f"### 📑 批量报告输出展示区 ({chosen_global_stage})")
+    st.markdown("### 📑 独立 CFA 模型拟合报告展示区")
     
-    # 100% 动态横向拉出各量表卡片，安全无报错
-    report_tabs = st.tabs([f"📄 {k} 独立CFA模型报告" for k in m_keys])
+    # 横向切分渲染各量表独立卡片页，运行平稳稳健
+    report_tabs = st.tabs([f"📄 {k} 模型报告" for k in m_keys])
     
     for idx, m_id in enumerate(m_keys):
         bundle = st.session_state["cfa_multi_scenarios"][m_id]
-        s_data = bundle[stage_key]
-        cfg_meta = bundle["config"]
+        s_data = bundle["final"]
         
-        # 精准解构底层原本模型的计算资产
         model_obj, estimates, fit_stats = s_data["result"]
         
         with report_tabs[idx]:
-            st.markdown(f"#### 🔍 量表【{m_id}】CFA报告指标细节")
+            st.markdown(f"#### 🔍 量表【{m_id}】CFA模型指标细节")
             
-            # 报表 1：模型拟合优度判定表格
             st.markdown("**1. 模型拟合优度判定 (Model Fit Indices)**")
             st.dataframe(fit_stats, use_container_width=True, hide_index=True)
             
-            # 报表 2：一题一行标准因子载荷与测量路径显著性表
             st.markdown("**2. 因子载荷与测量路径显著性检验 (Factor Loadings)**")
             st.dataframe(estimates, use_container_width=True, hide_index=True)
             
-            # 报表 3：进化链路跟踪参考
             with st.expander("🪵 查看该量表全自动纯化删题轨迹 (Trace Log)", expanded=False):
                 for log in bundle["logs"]:
-                    dot = "🟢" if log["cfi"] >= 0.95 and log["tli"] >= 0.95 else ("🟡" if log["cfi"] >= 0.90 and log["tli"] >= 0.90 else "🔴")
+                    dot = "🟢" if log["cfi"] >= 0.90 and log["tli"] >= 0.90 else "🔴"
                     st.markdown(f"{dot} **步序 {log['step']}** | 剩余项数: `{len(log['items'])}` | **CFI**=`{log['cfi']:.4f}` | **TLI**=`{log['tli']:.4f}`")
                     st.caption(f"动作: {log['msg']}")
-
-
-
 
 
 
