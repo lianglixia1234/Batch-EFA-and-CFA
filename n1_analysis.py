@@ -1419,15 +1419,6 @@ def render_stage2_cfa_clean():
                         show_selection_controls=True,
                     )
                 
-                # 🛠️ 每个独立 Tab 底部的“局部试运行/核对”按钮
-                tab_run_col1, tab_run_col2 = st.columns([1, 2])
-                with tab_run_col1:
-                    if st.button(f"🔍 试运行单量表 CFA: {sub_name}", key=f"run_single_cfa_btn_{sub_name}"):
-                        if not factor_items:
-                            st.error("❌ 主因子题目不能为空")
-                        else:
-                            st.info(f"正在对【{sub_name}】进行结构有效性试运行测试...")
-                            # 这里可以调用您原版的 run_cfa_gui 逻辑，并将单次试运行结果呈现在本 Tab 底部。
                 
                 # 安全压入全局准备队列缓存
                 if factor_items:
