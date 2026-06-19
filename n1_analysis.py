@@ -1226,31 +1226,16 @@ def run_cfa_gui(df, factor_name, factor_items, method_name, method_items):
 
 
 
+
 # ==============================================================================
-# 🧪 2. 自动删题 CFA 板块 (使用EFA资产驱动型 ➔ 100% 稳健收敛高兼容版)
-# ==============================================================================
-# ==============================================================================
-# 🧪 2. EFA资产驱动 ➔ 保留方法因子 + 0.90极致清洗单标准自动删题 CFA 版
+# 🧪 2. 自动删题 CFA 版
 # ==============================================================================
 def render_stage2_cfa_clean():
-    """
-    【CFA 0.90 单达标线 ➔ 强力数据清洗+保留方法因子版】
-    
-    核心逻辑：
-    1. 坚守方法因子：100% 保留方法因子（Method Factor），不破坏您的双因子理论模型。
-    2. EFA级极致清洗：在试删闭包内，对当前题目执行极其严格的强制数值化（pd.to_numeric）与彻底去空（.dropna()），
-       确保送入 semopy 引擎的数据和 EFA 一样纯净无瑕，从根源上消灭“不收敛”报错。
-    3. 0.90 目标聚焦：取消 0.95 冲刺。只要 CFI >= 0.90 并且 TLI >= 0.90，说明已经找到保底达标方案，
-       立即停止删题，最大化保护您的问卷题量。
-    """
-    st.subheader("🔄 CFA 0.90 达标导型批量自动删题引擎（极致数据清洗+保留方法因子）")
-
-    # ==========================================================================
-    # 🧬 1. 读取与校准上游 EFA 资产
+    # 🧬 1. 精准读取上游 EFA 资产与底层实体数据
     # ==========================================================================
     n1_asset = st.session_state.get("N1_preEFA")
     if not n1_asset:
-        st.info("💡 暂未检测到 N1_preEFA 结果。请确保在前置 EFA 模块中完成了分析并保存。")
+        st.info("💡 暂未检测到上游 EFA（N1_preEFA）留存的题目结果。请确保在前置 EFA 模块中完成了分析、勾选了确认并保存。")
         return
 
     all_upstream_measures = {}
@@ -1258,11 +1243,10 @@ def render_stage2_cfa_clean():
         for ds_key, measure_dict in n1_asset.items():
             if isinstance(measure_dict, dict):
                 for m_id, m_config in measure_dict.items():
+                    # 🌟 核心联动：精准提取 EFA 留下来的结果
                     if isinstance(m_config, dict) and "kept_items" in m_config:
-                        # 优先拉取上游 EFA 已经清洗过的数据集对象
                         raw_df_entity = m_config.get("clean_df")
                         
-                        # 兜底查找底层实体数据
                         if raw_df_entity is None:
                             if "sub_datasets" in st.session_state and ds_key in st.session_state.sub_datasets:
                                 raw_df_entity = st.session_state.sub_datasets[ds_key]
@@ -1271,25 +1255,26 @@ def render_stage2_cfa_clean():
                             else:
                                 raw_df_entity = st.session_state.get("df_source")
                         
+                        # 将 EFA 保留的题目作为 CFA 的初始分析目标
                         all_upstream_measures[str(m_id)] = {
-                            "items": m_config["kept_items"],  
+                            "items": m_config["kept_items"],  # 👈 EFA 过滤后的纯净题目
                             "clean_df": raw_df_entity,        
                             "measure_id_raw": m_id,
                             "ds_key": ds_key
                         }
 
     if not all_upstream_measures:
-        st.error("❌ 无法从上游提取到任何有效的量表架构资产。")
+        st.error("❌ 无法从上游 N1_preEFA 资产中提取到任何有效的量表数据。")
         return
 
     # ==========================================================================
-    # 📂 2. 配置单维度保留底线
+    # 📂 2. 用户自主选择与精简保护参数配置
     # ==========================================================================
     st.markdown("---")
     st.markdown("### 🔍 第一步：勾选您本次需要分析的量表")
     
     selected_measure_ids = st.multiselect(
-        "📂 请在下方选择要拉入 CFA 自动优化删题流的量表（默认全选）：",
+        "📂 请在下方选择要拉入 CFA 自动优化删题流的量表（默认已自动加载 EFA 保留项）：",
         options=list(all_upstream_measures.keys()),
         default=list(all_upstream_measures.keys())
     )
@@ -1300,264 +1285,655 @@ def render_stage2_cfa_clean():
 
     sub_datasets = {k: all_upstream_measures[k] for k in selected_measure_ids}
 
-    min_items_limit = st.number_input(
-        "🛑 单维度最小保留题目底线",
-        min_value=3, max_value=30, value=3, step=1,
-        help="当维度内题目数减少到该值时，算法必须触发强制安全保护停止删题。"
-    )
+    # 阈值与兜底限制设置
+    col_param1 = st.columns(1)[0]
+    with col_param1:
+        min_items_limit = st.number_input(
+            "🛑 单维度最小保留题目底线",
+            min_value=3, max_value=30, value=3, step=1,
+            help="当维度内题目数减少到该值时，算法必须触发强制安全保护停止删题，防止被删空。"
+        )
 
     # ==========================================================================
     # 🛠️ 3. 测量模型结构核对看板
     # ==========================================================================
     st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对看板")
 
-    cfa_ready_queue = {}  
-    for sub_name, asset_body in sub_datasets.items():
-        factor_items = asset_body.get("items", [])
+    # 清洗列名
+    def clean_col_name(name):
+        return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
+
+    df_analysis.columns = [clean_col_name(c) for c in df_analysis.columns]
+
+    
+    # ==========================================================
+    # 🔴 核心修改：智能保留数值列 (Smart Numeric Filter)
+    # ==========================================================
+    st.write("📊 **数据预处理报告**")
+
+    # 1. 强制转换为数值 (非数字变为 NaN)
+    df_numeric = df_analysis.apply(pd.to_numeric, errors='coerce')
+    
+    # 2. 剔除“非数值列”
+    # 如果某一列转换后全是 NaN (例如"姓名"列)，说明它不是量表题，直接删除该列
+    # 这样可以防止后面 dropna 时把整行数据都误删了
+    cols_before = df_numeric.columns
+    df_numeric = df_numeric.dropna(axis=1, how='all')
+    cols_after = df_numeric.columns
+    
+    # 提示用户删除了哪些列
+    dropped_cols = set(cols_before) - set(cols_after)
+    if dropped_cols:
+        st.info(f"ℹ️ 已自动过滤掉 {len(dropped_cols)} 个非数值列 (仅用于分析的量表题被保留): {', '.join(list(dropped_cols)[:5])}...")
+
+    # 3. 剔除“含有缺失值或无穷大值的行”
+    # 现在剩下的列都是纯数字了，可以安全地删除漏填的样本
+    original_len = len(df_numeric)
+
+    # 移除包含NaN的行
+    df_numeric = df_numeric.dropna(axis=0, how='any')
+
+    # 移除包含无穷大值(Inf)的行
+    df_numeric = df_numeric.replace([np.inf, -np.inf], np.nan).dropna()
+    df_numeric = df_numeric[~df_numeric.isin([np.inf, -np.inf]).any(axis=1)]
+
+    cleaned_len = len(df_numeric)
+
+    removed_rows = original_len - cleaned_len
+    if removed_rows > 0:
+        st.warning(f"⚠️ 已移除 {removed_rows} 行含有缺失值或无穷大值的样本。CFA 最终分析样本量: {cleaned_len}")
+    else:
+        st.success(f"✅ 数据完整，有效样本量: {cleaned_len}")
+    
+    if cleaned_len < 10:
+        st.error("❌ 有效样本量太少 (<10)，无法进行 CFA 分析。请检查数据是否包含大量缺失值。")
+        return
+
+    # 更新供用户选择的题目列表 (现在只包含数值列了)
+    all_items = df_numeric.columns.tolist()
+    # ==========================================================
+    # --- 2. 模型构建 ---
+    st.subheader("1. 构建模型 (Model Configuration)")
+    
+    # 🆕 导入 EFA 结构按钮
+    if 'efa_suggested_structure' in st.session_state:
+        st.markdown("##### 🔗 EFA 连接")
+        if st.button("📥 导入 N1 模块生成的 EFA 结构"):
+            structure = st.session_state.efa_suggested_structure
+            # 假设 EFA 只有一个主因子 F1 (或者取第一个因子作为 Trait)
+            # 如果有多个因子，这里默认取第一个作为演示，或者让用户选
+            # 这里简单化：取所有因子的题目合集作为 Trait Items (通常单因子CFA)
+            # 或者取 F1 的题目。
+            
+            # 策略：默认把 EFA 的第一个因子的题目填入 A
+            first_factor = list(structure.keys())[0]
+            items_for_f1 = structure[first_factor]
+            
+            st.session_state.auto_fill_items = items_for_f1
+            st.success(f"已导入 EFA {first_factor} 的 {len(items_for_f1)} 个题目到主因子。")
+
+    col1, col2 = st.columns(2)
+    
+    # 获取默认选项
+    default_items = st.session_state.get('auto_fill_items', [])
+    # 确保默认选项都在当前 all_items 里 (防止文件名不同导致的 mismatch)
+    default_items = [i for i in default_items if i in all_items]
+
+    with col1:
+        st.markdown("#### 🅰️ 主因子 (Trait Factor)")
+        factor_name = st.text_input("给主因子起个名 (英文):", value="Factor1")
+        
+        # 主因子选择
+        factor_items = smart_multiselect(
+            options=all_items,
+            label=f"选择属于 {factor_name} 的题目",
+            key_suffix="cfa_factor1",
+            default_selected=default_items,
+            show_selection_controls=True,
+        )
+
+    with col2:
+        st.markdown("#### 🅱️ 方法因子 (Method Factor)")
+        method_name = st.text_input("给方法因子起个名 (英文):", value="Method")
+        
+        # 限制范围: 只能从 factor_items (主因子已选题目) 中选择
+        method_options = factor_items if factor_items else []
+        method_key_suffix = "cfa_method"
+        method_sig_key = f"{method_key_suffix}_options_sig"
+        method_options_sig = tuple(method_options)
+        if st.session_state.get(method_sig_key) != method_options_sig:
+            _reset_smart_multiselect_cache(method_key_suffix)
+            st.session_state[method_sig_key] = method_options_sig
+        # 根据统一规则（末尾 r）自动预选方法因子，供用户确认
+        default_method_items = [x for x in method_options if _is_reverse_coded(x)] if method_options else []
+        st.caption("已根据统一规则（题目文本末尾为 r）预选方法因子题目，请确认或修改。")
+        def _on_reset_method_n2():
+            _reset_smart_multiselect_cache(method_key_suffix)
+            st.session_state[method_sig_key] = method_options_sig
+            st.session_state[f"{method_key_suffix}_last_selected"] = default_method_items
+        st.button('按”末尾 r”规则重新预选方法因子题目', key="n2_btn_reset_method_defaults",
+                  on_click=_on_reset_method_n2)
+        method_items = smart_multiselect(
+            options=method_options,
+            label=f"选择受到 {method_name} 影响的题目",
+            key_suffix=method_key_suffix,
+            default_selected=default_method_items,
+            show_selection_controls=True,
+        )
+    # --- 3. 模型拟合 ---
+    st.markdown("---")
+    cfa_btn_col, cfa_prelim_col = st.columns([1, 1])
+    with cfa_btn_col:
+        run_clicked = st.button("🚀 开始运行 CFA 分析", type="primary")
+    with cfa_prelim_col:
+        if "n2_prelim_single_cfa" not in st.session_state:
+            st.session_state.n2_prelim_single_cfa = False
+        prelim_checked = st.checkbox("当前为 preliminary CFA", value=st.session_state.n2_prelim_single_cfa, key="n2_prelim_checkbox")
+        st.session_state.n2_prelim_single_cfa = prelim_checked
+    if run_clicked:
         if not factor_items:
-            continue
-        sorted_items = sort_item_cols_by_number(list(factor_items))
-
-        auto_detected_reverse_items = [
-            item for item in sorted_items 
-            if str(item).rstrip().endswith("r") or str(item).rstrip().endswith("_r") or "反向" in str(item)
-        ]
-
-        with st.expander(f"👀 核对量表 【{sub_name}】 的因子架构", expanded=False):
-            confirmed_method_items = st.multiselect(
-                f"✍ * 确认/微调 【{sub_name}】 纳入逆向方法因子（Method Factor）的题目：",
-                options=sorted_items,
-                default=auto_detected_reverse_items,
-                key=f"audit_method_override_{sub_name}"
-            )
-            
-            cfa_ready_queue[sub_name] = {
-                "asset_body": asset_body,
-                "df_numeric": asset_body.get("clean_df"),
-                "factor_name": f"{sub_name}_Trait",
-                "method_name": f"{sub_name}_Method" if confirmed_method_items else None,
-                "initial_factor_items": sorted_items,
-                "initial_method_items": confirmed_method_items
-            }
-
-    # ==========================================================================
-    # 🚀 4. 全自动 0.90 强力洗涤删题引擎（保留方法因子）
-    # ==========================================================================
-    st.markdown("---")
-    st.markdown("### 🚀 第三步：启动 0.90 双指标达标优化计算")
-    
-    if st.button("🔥 启动 0.90 保留方法因子强收敛引擎", type="primary", use_container_width=True):
-        progress_bar = st.progress(0)
-        queue_keys = list(cfa_ready_queue.keys())
-        
-        # 初始化批量方案空间暂存器
-        st.session_state["cfa_multi_scenarios"] = {}
-        
-        for idx, sub_name in enumerate(queue_keys):
-            cfg = cfa_ready_queue[sub_name]
-            df_raw = cfg["df_numeric"]
-            if df_raw is None or df_raw.empty:
-                continue
+            st.error("❌ 错误：请至少为主因子选择 1 个题目。")
+        else:
+            with st.spinner("正在拟合模型，请稍候..."):
+                factor_items_for_model = sort_item_cols_by_number(list(factor_items))
+                method_items_for_model = sort_item_cols_by_number(list(method_items)) if method_items else []
+                result, err_msg, syntax_used = run_cfa_gui(
+                    df_numeric, factor_name, factor_items_for_model, method_name, method_items_for_model
+                )
                 
-            factor_name = cfg["factor_name"]
-            method_name_raw = cfg["method_name"]
-            initial_factor_items = list(cfg["initial_factor_items"])
-            initial_method_items = list(cfg["initial_method_items"])
-            
-            with st.spinner(f"正在为量表【{sub_name}】逐轮试删寻解 0.90 CFA 达标路径..."):
-                try:
-                    current_factor_items = list(initial_factor_items)
-                    current_method_items = list(initial_method_items)
-                    active_method_name = method_name_raw
+                if err_msg:
+                    st.error(err_msg)
+                    st.code(syntax_used, language="text")
+                else:
+                    model_obj, estimates, fit_stats = result
+                    st.success("✅ 模型拟合成功！")
                     
-                    # 💡【极致清洗闭包】：严格模仿 EFA 的洗数据标准，对选定截面实施无死角去空与类型转换
-                    def evaluate_combination(f_items, m_items, use_m_name):
-                        m_items_filtered = [m for m in m_items if m in f_items]
-                        needed_cols = list(set(f_items))
-                        
-                        # ✨ 核心护航：执行 EFA 级别的强力数据清洗，强转纯数字，并切片剔除任何包含 NaN 的行
+                    st.session_state.n2_estimates = estimates
+                    st.session_state.n2_fit_stats = fit_stats
+                    st.session_state.n2_syntax = syntax_used
+                    st.session_state.n2_factor_name = factor_name
+                    st.session_state.n2_method_name = method_name
+                    # 保存用于可下载报告：CFA 使用的数据与题目列表
+                    df_cfa_used = df_numeric[factor_items_for_model].dropna(axis=0)
+                    st.session_state.n2_df_cfa = df_cfa_used
+                    st.session_state.n2_factor_items = list(factor_items_for_model)
+                    st.session_state.n2_method_items = list(method_items_for_model)
+
+    # --- 4. 结果展示 ---
+    if 'n2_fit_stats' in st.session_state:
+        st.markdown("---")
+        st.subheader("2. 分析结果")
+        
+        stats_dict = st.session_state.n2_fit_stats
+        
+        # 1. 关键指标高亮 (Top 8 Highlight)
+        st.markdown("###### 🏆 关键模型拟合指标 (Key Fit Indices)")
+        
+        def get_val(key):
+            val = stats_dict.get(key, np.nan)
+            return val if isinstance(val, (int, float)) else np.nan
+
+        metrics = {
+            "CFI": get_val("CFI"),
+            "TLI": get_val("TLI"),
+            "RMSEA": get_val("RMSEA"),
+            "SRMSR": get_val("SRMR"),
+            # 🆕 修改标签: Explicitly User Model
+            "Chi-Square (User Model)": get_val("chi2"),
+            "AIC": get_val("AIC"),
+            "BIC": get_val("BIC"),
+            "SABIC": get_val("SABIC")
+        }
+
+        m_cols1 = st.columns(4)
+        keys1 = ["CFI", "TLI", "RMSEA", "SRMSR"]
+        for i, k in enumerate(keys1):
+            val = metrics[k]
+            display_val = f"{val:.3f}" if not np.isnan(val) else "N/A"
+            m_cols1[i].metric(label=k, value=display_val)
+
+        st.markdown("") 
+        m_cols2 = st.columns(4)
+        # 🆕 修改标签列表
+        keys2 = ["Chi-Square (User Model)", "AIC", "BIC", "SABIC"] 
+        for i, k in enumerate(keys2):
+            val = metrics[k]
+            display_val = f"{val:.3f}" if not np.isnan(val) else "N/A"
+            m_cols2[i].metric(label=k, value=display_val)
+
+        # 2. 详细表格 (Estimates)
+        st.markdown("---")
+        t1, t2 = st.tabs(["📄 详细参数估计 (Estimates)", "🔍 完整拟合报告"])
+        
+        with t1:
+            #st.caption("Standardized Estimates (Std. Est) 为标准化载荷。")
+            st.caption("Latent Variables (Factor Loadings) & Covariances")
+            est_df = st.session_state.n2_estimates.copy() # 复制一份，避免修改原数据
+            # --- [新增] 排序逻辑 (Part 1-5) ---
+            fname = st.session_state.n2_factor_name
+            mname = st.session_state.n2_method_name
+            
+            def get_sort_rank(row):
+                lhs, op, rhs = row['LHS'], row['op'], row['RHS']
+                # Part 1: 每个题目 ~ 主因子 (op='=~', LHS=主因子)
+                if op == '=~' and lhs == fname: return 1
+                # Part 2: 每个题目 ~ 方法因子 (op='=~', LHS=方法因子)
+                if op == '=~' and lhs == mname: return 2
+                # Part 3: 主因子 ~ 主因子 (Variance: op='~~', LHS=RHS=主因子)
+                if op == '~~' and lhs == rhs and lhs == fname: return 3
+                # Part 4: 方法因子 ~ 方法因子 (Variance: op='~~', LHS=RHS=方法因子)
+                if op == '~~' and lhs == rhs and lhs == mname: return 4
+                # Part 5: 每个题目 ~ 每个题目 (Residuals: op='~~', LHS=RHS, LHS!=因子)
+                if op == '~~' and lhs == rhs and lhs not in [fname, mname]: return 5
+                
+                # 其他 (如 Covariance: Factor ~~ Method，放在最后)
+                return 6
+
+            # 应用排序
+            est_df['rank'] = est_df.apply(get_sort_rank, axis=1)
+            est_df = est_df.sort_values('rank').drop(columns=['rank'])
+            
+            # --- 格式化并显示 ---
+            numeric_cols = est_df.select_dtypes(include=[np.number]).columns
+            format_dict = {col: "{:.3f}" for col in numeric_cols}
+            
+            # 筛选展示列 (模仿 lavaan)
+            display_cols = ['LHS', 'op', 'RHS', 'Estimate', 'Std.Err', 'z-value', 'P(>|z|)', 'Std.all']
+            # 防止某些列不存在
+            final_cols = [c for c in display_cols if c in est_df.columns]
+            
+            st.dataframe(est_df[final_cols].style.format(format_dict))
+            
+            csv = est_df.to_csv().encode('utf-8-sig')
+            st.download_button("📥 下载参数估计表", csv, "cfa_estimates.csv", "text/csv")
+            '''
+            # === 🆕 新增：自定义排序逻辑 ===
+            # 获取运行分析时使用的因子名称
+            if 'n2_factor_names' in st.session_state:
+                trait_name, method_name = st.session_state.n2_factor_names
+            else:
+                # 兼容旧状态（以防万一）
+                trait_name, method_name = factor_name, method_name
+
+            def get_sort_rank(row):
+                lhs, op, rhs = row['LHS'], row['op'], row['RHS']
+                
+                # Rank 1: 每个题目 ~ 主因子 (Factor Loadings - Trait)
+                # op 是 =~, 左边是主因子名
+                if op == '=~' and lhs == trait_name:
+                    return 1
+                
+                # Rank 2: 每个题目 ~ 方法因子 (Factor Loadings - Method)
+                # op 是 =~, 左边是方法因子名
+                if op == '=~' and lhs == method_name:
+                    return 2
+                
+                # Rank 3: 主因子 ~ 主因子 (Latent Variance)
+                # op 是 ~~, 左右相等, 且是主因子
+                if op == '~~' and lhs == rhs and lhs == trait_name:
+                    return 3
+                
+                # Rank 4: 方法因子 ~ 方法因子 (Method Variance)
+                # op 是 ~~, 左右相等, 且是方法因子
+                if op == '~~' and lhs == rhs and lhs == method_name:
+                    return 4
+                
+                # Rank 5: 每个题目 ~ 每个题目 (Residual Variances)
+                # op 是 ~~, 左右相等, 且不是因子名
+                if op == '~~' and lhs == rhs and lhs not in [trait_name, method_name]:
+                    return 5
+                
+                # 其他 (例如因子间的协方差，虽然这里设为0但也存在)
+                return 6
+
+            # 应用排序: 先按 Rank 排，Rank 相同的按 RHS (题目名) 排
+            est_df['Sort_Rank'] = est_df.apply(get_sort_rank, axis=1)
+            est_df = est_df.sort_values(by=['Sort_Rank', 'RHS'])
+            
+            # 移除辅助列，准备展示
+            # 筛选我们关心的列 (模仿 lavaan 输出)
+            display_cols = ['LHS', 'op', 'RHS', 'Estimate', 'Std.Err', 'z-value', 'P(>|z|)', 'Std.all']
+            final_cols = [c for c in display_cols if c in est_df.columns]
+            est_display = est_df[final_cols].copy()
+            # =================================
+            
+            # 只对数值列应用格式化
+            numeric_cols = est_display.select_dtypes(include=[np.number]).columns
+            format_dict = {col: "{:.3f}" for col in numeric_cols}
+            
+            st.dataframe(est_display.style.format(format_dict))
+            
+            csv = est_display.to_csv().encode('utf-8-sig')
+            st.download_button("📥 下载参数估计表", csv, "cfa_estimates.csv", "text/csv")
+            '''
+        '''    
+        with t2:
+            st.write("所有计算出的拟合指数：")
+            # 将字典转为 DataFrame 展示
+            fit_df_full = pd.DataFrame([stats_dict]).T
+            fit_df_full.columns = ["Value"]
+            
+            st.dataframe(fit_df_full.style.format("{:.3f}"))
+            
+            st.markdown("**生成的模型语法 (Syntax Used):**")
+            st.code(st.session_state.n2_syntax, language="text")
+        '''
+        with t2:
+            st.write("### Model Test User Model:")
+            
+            # --- [新增] 单独展示 User Model Chi-Square ---
+            # semopy calc_stats 使用 DoF、chi2 p-value 等键名，兼容多种写法
+            def _get_any(d, keys, default=np.nan):
+                for k in keys:
+                    v = d.get(k, default)
+                    if v is not None and isinstance(v, (int, float)) and not (isinstance(v, float) and np.isnan(v)):
+                        return v
+                return default
+            chi2_val = _get_any(stats_dict, ['chi2', 'Chi2'])
+            dof_val = _get_any(stats_dict, ['DoF', 'dof', 'df'])
+            p_val = _get_any(stats_dict, ['chi2 p-value', 'p-value', 'pvalue', 'p_value'])
+            
+            # 构建特定格式的表格
+            model_test_df = pd.DataFrame({
+                "Statistic": ["Test statistic", "Degrees of freedom", "P-value (Chi-square)"],
+                "Value": [
+                    f"{chi2_val:.3f}" if not np.isnan(chi2_val) else "N/A",
+                    f"{int(dof_val)}" if not np.isnan(dof_val) else "N/A",
+                    f"{p_val:.4f}" if not np.isnan(p_val) else "N/A"
+                ]
+            })
+            
+            st.table(model_test_df)
+            
+            st.write("### User Model versus Baseline Model:")
+            # 展示其他所有指标 (作为 Baseline 对比参考)
+            fit_df_full = pd.DataFrame([stats_dict]).T
+            fit_df_full.columns = ["Value"]
+            
+            # 安全格式化
+            num_cols_fit = fit_df_full.select_dtypes(include=[np.number]).columns
+            format_dict_fit = {col: "{:.3f}" for col in num_cols_fit}
+            
+            st.dataframe(fit_df_full.style.format(format_dict_fit))
+            
+            st.markdown("**生成的模型语法 (Syntax Used):**")
+            st.code(st.session_state.n2_syntax, language="text")
+
+        # --- 5. 生成可下载报告 (measure_id + 题目表 + 协方差矩阵) ---
+        if all(k in st.session_state for k in ("n2_df_cfa", "n2_factor_items", "n2_estimates", "n2_fit_stats")):
+            st.markdown("---")
+            st.text_input(
+                "量表 measure_id（唯一编码，用于所有可下载文件命名）",
+                value=(st.session_state.get("n2_measure_id") or ""),
+                key="n2_measure_id",
+                placeholder="如 LQ、EQ 等问卷缩写",
+                help="下方「生成可下载报告表」「最终得分计算」「导出公式参数表」等功能的下载文件均沿用此 measure_id。",
+            )
+            st.markdown("#### 📥 生成可下载报告表")
+            st.caption("一表为每题一行的报告，一表为题目协方差矩阵。")
+            if st.button("生成并下载 Excel 报告", key="n2_btn_gen_report"):
+                mid = (st.session_state.get("n2_measure_id") or "").strip() or "measure"
+                if not mid:
+                    st.warning("请填写 measure_id。")
+                else:
+                    try:
+                        df_cfa = st.session_state.n2_df_cfa
+                        factor_items = st.session_state.n2_factor_items
+                        estimates = st.session_state.n2_estimates
+                        stats_dict = st.session_state.n2_fit_stats
+                        fname = st.session_state.n2_factor_name
+
+                        # 列名清洗函数（与 run_cfa_gui 中一致）
+                        def _clean_col(name):
+                            return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
+
+                        # 建立原始列名到清洗后列名的映射（因为 estimates 中的 RHS 是清洗后的列名）
+                        item_clean_map = {item: _clean_col(item) for item in factor_items}
+
+                        def _to_num(x):
+                            try:
+                                if x is None:
+                                    return np.nan
+                                if isinstance(x, str):
+                                    x = x.strip()
+                                    if x in ("", "-", "nan", "NaN", "None"):
+                                        return np.nan
+                                return float(x)
+                            except (TypeError, ValueError):
+                                return np.nan
+
+                        # 兼容不同来源/版本的拟合指标键名（大小写/符号不敏感）
+                        def _norm_key(k):
+                            return re.sub(r"[^a-z0-9]+", "", str(k).lower())
+
+                        _stats_norm = {_norm_key(k): v for k, v in stats_dict.items()}
+
+                        def _get_any(d, keys, default=np.nan):
+                            # 1) 先按原键精确匹配
+                            for k in keys:
+                                if k in d:
+                                    v = _to_num(d.get(k))
+                                    if not np.isnan(v):
+                                        return v
+                            # 2) 再按归一化键名匹配
+                            for k in keys:
+                                nk = _norm_key(k)
+                                if nk in _stats_norm:
+                                    v = _to_num(_stats_norm.get(nk))
+                                    if not np.isnan(v):
+                                        return v
+                            return default
+
+                        # 潜变量方差 (主因子)
+                        trait_var = np.nan
+                        est = estimates
+                        for _, row in est.iterrows():
+                            if row.get("op") == "~~" and row.get("LHS") == fname and row.get("RHS") == fname:
+                                trait_var = row.get("Estimate", np.nan)
+                                break
+
+                        # 载荷：与「Latent Variables (Factor Loadings) & Covariances」表同一逻辑取数
+                        # 兼容 semopy 两种常见表示：
+                        # A) op='=~' 且 LHS=潜变量, RHS=题目
+                        # B) op='~'  且 RHS=潜变量, LHS=题目
+                        loadings_unstd = {}
+                        loadings_std = {}
+                        if "LHS" in est.columns and "op" in est.columns and "RHS" in est.columns:
+                            trait_loadings = est[(est["op"] == "=~") & (est["LHS"] == fname)]
+                            if not trait_loadings.empty:
+                                for _, row in trait_loadings.iterrows():
+                                    item_key = row["RHS"]
+                                    loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in est.columns else np.nan
+                                    loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in est.columns else np.nan
+                            else:
+                                trait_loadings = est[(est["op"] == "~") & (est["RHS"] == fname)]
+                                for _, row in trait_loadings.iterrows():
+                                    item_key = row["LHS"]
+                                    loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in est.columns else np.nan
+                                    loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in est.columns else np.nan
+
+                        chi2_val = _get_any(stats_dict, ["chi2", "Chi2"])
+                        dof_val = _get_any(stats_dict, ["DoF", "dof", "df"])
+                        p_val = _get_any(stats_dict, ["chi2 p-value", "p-value", "pvalue", "p_value"])
+                        alpha_val = cronbach_alpha(df_cfa) if not df_cfa.empty else np.nan
+
+                        # Composite Reliability (CR_F): 使用完全标准化载荷
+                        # lambda_std_i = lambda_i * sqrt(phi) / s_i, 其中 s_i 来自题目协方差矩阵 Sigma 的对角线
+                        cr_val = np.nan
+                        cr_reason = ""
                         try:
-                            df_clean_step = df_raw[needed_cols].apply(pd.to_numeric, errors='coerce').dropna(axis=0)
-                        except Exception:
-                            df_clean_step = df_raw[needed_cols].dropna(axis=0)
-                            
-                        # 样本量安全底线
-                        if df_clean_step.empty or len(df_clean_step) < 10:
-                            return None, 0.0, 0.0
-                        
-                        # 保护措施：如果被剔除得只剩1题或0题，方法因子在语义上失效，临时隐去防止自由度报错
-                        actual_m_name = use_m_name if len(m_items_filtered) >= 2 else None
-                        
-                        # 透传底层原汁原味的运算引擎 run_cfa_gui 
-                        res, err, syntax = run_cfa_gui(df_clean_step, factor_name, f_items, actual_m_name, m_items_filtered)
-                        if err or res is None:
-                            return None, 0.0, 0.0
-                        
-                        # 精准锁定当前的真实拟合度
-                        fit_df = res[2]
-                        cfi_val = float(fit_df.loc[fit_df["Metric"] == "CFI", "Value"].values[0]) if "CFI" in fit_df["Metric"].values else 0.0
-                        tli_val = float(fit_df.loc[fit_df["Metric"] == "TLI", "Value"].values[0]) if "TLI" in fit_df["Metric"].values else 0.0
-                        return res, cfi_val, tli_val
+                            sorted_items_for_cr = sort_item_cols_by_number(factor_items)
+                            sorted_items_clean_for_cr = [item_clean_map.get(c, c) for c in sorted_items_for_cr]
+                            used_cols_for_cr = [c for c in sorted_items_clean_for_cr if c in df_cfa.columns]
+                            if not used_cols_for_cr:
+                                cr_reason = "CR 未计算：未找到用于 CR 的题目列。"
+                            else:
+                                x_cr = df_cfa[used_cols_for_cr].apply(pd.to_numeric, errors="coerce").dropna(axis=0, how="any")
+                                if x_cr.empty:
+                                    cr_reason = "CR 未计算：用于 CR 的有效样本为空（题目存在缺失/非数值）。"
+                                else:
+                                    sigma_cr = x_cr.cov().values
+                                    s_vec = np.sqrt(np.diag(sigma_cr))
+                                    lambda_unstd_vec = np.array(
+                                        [_to_num(loadings_unstd.get(c, np.nan)) for c in used_cols_for_cr],
+                                        dtype=float,
+                                    )
+                                    phi_num = _to_num(trait_var)
+                                    if np.isnan(phi_num) or phi_num <= 0:
+                                        cr_reason = "CR 未计算：主因子方差 φ 缺失或非正数。"
+                                    elif np.isnan(lambda_unstd_vec).any():
+                                        miss_cols = [used_cols_for_cr[i] for i, v in enumerate(lambda_unstd_vec) if np.isnan(v)]
+                                        cr_reason = f"CR 未计算：以下题目缺少非标准化载荷：{', '.join(miss_cols[:6])}"
+                                    elif (not np.all(np.isfinite(s_vec))) or np.any(s_vec <= 0):
+                                        cr_reason = "CR 未计算：题目标准差（来自协方差矩阵对角线）存在无效值。"
+                                    else:
+                                        lambda_std = (lambda_unstd_vec * np.sqrt(phi_num)) / s_vec
+                                        S = float(np.sum(lambda_std))
+                                        E = float(np.sum(1.0 - lambda_std ** 2))
+                                        den = (S ** 2) + E
+                                        if np.isfinite(den) and den > 0:
+                                            cr_val = float((S ** 2) / den)
+                                        else:
+                                            cr_reason = "CR 未计算：分母无效（可能由异常载荷导致）。"
+                        except Exception as cr_e:
+                            cr_val = np.nan
+                            cr_reason = f"CR 未计算：计算过程异常（{cr_e}）。"
 
-                    # 测定 V0 初始全量模型
-                    res_v0, cfi_v0, tli_v0 = evaluate_combination(current_factor_items, current_method_items, active_method_name)
-                    
-                    # 💡【退化保护绳】：若全量题目过多叠加方法因子导致 V0 初始矩阵绝对不收敛，
-                    # 临时以标准单因子形式启动初始节点，确保算法能够平稳向前迭代试删
-                    if res_v0 is None and active_method_name is not None:
-                        res_v0, cfi_v0, tli_v0 = evaluate_combination(current_factor_items, current_method_items, None)
-                        if res_v0 is not None:
-                            st.caption(f"ℹ️ 量表【{sub_name}】初始由于全量题数过饱发生拥堵，已自动激活清洗启动绳，题目精简后将恢复方法因子。")
-                    
-                    if res_v0 is None:
-                        st.warning(f"⚠️ 量表【{sub_name}】在执行 EFA 级截面清洗后仍因内部逻辑无法收敛，跳过该量表。")
-                        continue
-                        
-                    history_logs = [{
-                        "step": 0, "removed_item": None, "msg": "初始清洗状态启动 (V0)",
-                        "items": list(current_factor_items), "method_items": list(current_method_items),
-                        "cfi": cfi_v0, "tli": tli_v0, "result": res_v0
-                    }]
+                        def _extract_item_number(item_name, item_clean_name, fallback_idx):
+                            # 1) 优先使用现有解析逻辑（EFA/CFA 前缀）
+                            _, num_parsed, _ = parse_item_col(item_name)
+                            if num_parsed is not None:
+                                return num_parsed
+                            _, num_clean_parsed, _ = parse_item_col(item_clean_name)
+                            if num_clean_parsed is not None:
+                                return num_clean_parsed
 
-                    # 逐轮迭代删除最差题目循环
-                    step_counter = 0
-                    while len(current_factor_items) > min_items_limit:
-                        # 🎯 唯一核心出口：只要 CFI 和 TLI 全都顺利跨过 0.90 保底线，直接见好就收，退出循环！
-                        if cfi_v0 >= 0.90 and tli_v0 >= 0.90:
-                            break
+                            # 2) 次选：从“前缀段”里提取数字（如 Q12_xxx / item_3_xxx）
+                            prefix_orig = str(item_name).split("_", 1)[0]
+                            prefix_clean = str(item_clean_name).split("_", 1)[0]
+                            m = re.search(r"(\d+)", prefix_orig)
+                            if m:
+                                return int(m.group(1))
+                            m2 = re.search(r"(\d+)", prefix_clean)
+                            if m2:
+                                return int(m2.group(1))
 
-                        best_combined_gain = -999.0
-                        best_cfi, best_tli = 0.0, 0.0
-                        item_to_remove = None
-                        best_res_obj = None
-                        
-                        # 尝试遍历删除每一个题目
-                        for candidate in current_factor_items:
-                            trial_factor = [item for item in current_factor_items if item != candidate]
-                            trial_method = [item for item in current_method_items if item != candidate]
-                            
-                            # 在每一轮试删中，我们都全力融入方法因子
-                            res_t, cfi_t, tli_t = evaluate_combination(trial_factor, trial_method, active_method_name)
-                            
-                            # 兜底：如果这题删除后带方法因子不收敛，则尝试用单因子计算
-                            if res_t is None:
-                                res_t, cfi_t, tli_t = evaluate_combination(trial_factor, trial_method, None)
-                                
-                            if res_t is None:
-                                continue
-                                
-                            combined_gain = cfi_t + tli_t
-                            if combined_gain > best_combined_gain:
-                                best_combined_gain = combined_gain
-                                best_cfi = cfi_t
-                                best_tli = tli_t
-                                item_to_remove = candidate
-                                best_res_obj = res_t
+                            # 3) 兜底：用当前顺序序号，避免导出空值
+                            return fallback_idx
 
-                        if item_to_remove is None:
-                            break
+                        sorted_items = sort_item_cols_by_number(factor_items)
+                        rows = []
+                        for idx, item in enumerate(sorted_items, start=1):
+                            _, num, text = parse_item_col(item)
+                            rev = 1 if _is_reverse_coded(item) else 0
+                            # 使用清洗后的列名去 estimates 中查找载荷值
+                            item_clean = item_clean_map.get(item, item)
+                            item_number = num if num is not None else _extract_item_number(item, item_clean, idx)
+                            rows.append({
+                                "measure_id": mid,
+                                "item_number": item_number,
+                                "item_text": text or item,
+                                "reverse": rev,
+                                "variance_latent": trait_var,
+                                "unstandardised_loading": loadings_unstd.get(item_clean, np.nan),
+                                "standardised_loading": loadings_std.get(item_clean, np.nan),
+                                "chi2_user_model": chi2_val,
+                                "df_user_model": dof_val,
+                                "p_value_user_model": p_val,
+                                "CFI": _get_any(stats_dict, ["CFI"]),
+                                "TLI": _get_any(stats_dict, ["TLI"]),
+                                "RMSEA": _get_any(stats_dict, ["RMSEA"]),
+                                "SRMR": _get_any(stats_dict, ["SRMR", "srmr"]),
+                                "GFI": _get_any(stats_dict, ["GFI"]),
+                                "AGFI": _get_any(stats_dict, ["AGFI"]),
+                                "NFI": _get_any(stats_dict, ["NFI"]),
+                                "LogL": _get_any(stats_dict, ["LogL", "logl", "LogLik", "loglik", "log_likelihood", "log-likelihood"]),
+                                "AIC": _get_any(stats_dict, ["AIC"]),
+                                "BIC": _get_any(stats_dict, ["BIC"]),
+                                "SABIC": _get_any(stats_dict, ["SABIC"]),
+                                "item_mean": df_cfa[item_clean].mean() if item_clean in df_cfa.columns else np.nan,
+                                "item_sd": df_cfa[item_clean].std() if item_clean in df_cfa.columns else np.nan,
+                                "cronbach_alpha": alpha_val,
+                                "Composite Reliability (CR)": cr_val,
+                            })
+                        sheet_items = pd.DataFrame(rows)
 
-                        # 执行剥离逻辑
-                        current_factor_items.remove(item_to_remove)
-                        if item_to_remove in current_method_items:
-                            current_method_items.remove(item_to_remove)
-                            
-                        step_counter += 1
-                        cfi_v0, tli_v0 = best_cfi, best_tli
-                        
-                        history_logs.append({
-                            "step": step_counter, "removed_item": item_to_remove,
-                            "msg": f"剥离低载荷项 ➔ 【{item_to_remove}】",
-                            "items": list(current_factor_items), "method_items": list(current_method_items),
-                            "cfi": cfi_v0, "tli": tli_v0, "result": best_res_obj
-                        })
+                        # 生成前校验提示：避免导出“看似成功但关键列为空”的报告
+                        unstd_empty = ("unstandardised_loading" not in sheet_items.columns) or sheet_items["unstandardised_loading"].isna().all()
+                        std_empty = ("standardised_loading" not in sheet_items.columns) or sheet_items["standardised_loading"].isna().all()
+                        logl_empty = ("LogL" not in sheet_items.columns) or sheet_items["LogL"].isna().all()
 
-                    # 锁定最完美终态达标方案
-                    st.session_state["cfa_multi_scenarios"][sub_name] = {
-                        "config": cfg,
-                        "logs": history_logs,
-                        "final": history_logs[-1]
-                    }
-                    
-                except Exception as ex:
-                    st.error(f"🚨 量表【{sub_name}】在纯化删题期间非正常中断: {ex}")
-                    
-            progress_bar.progress((idx + 1) / len(queue_keys))
-            
-        st.session_state["cfa_batch_run_done"] = True
-        st.balloons()
+                        # 载荷列是核心字段：若全空则阻止生成并给出定位提示
+                        if unstd_empty and std_empty:
+                            st.error(
+                                "生成前校验未通过：`unstandardised_loading` 与 `standardised_loading` 全为空。"
+                                "请先确认参数表中存在因子载荷行，并且题目列名与模型估计表可匹配后再生成。"
+                            )
+                            st.info(
+                                "排查建议：\n"
+                                "1) 查看「Latent Variables (Factor Loadings) & Covariances」是否有载荷行；\n"
+                                "2) 确认选中的题目确实进入模型；\n"
+                                "3) 重新运行一次 CFA 后再生成报告。"
+                            )
+                            st.stop()
 
-    # ==========================================================================
-    # 📊 5. 独立 CFA 报表批量输出区（彻底杜绝 st.tabs 崩溃）
-    # ==========================================================================
-    if not st.session_state.get("cfa_batch_run_done") or "cfa_multi_scenarios" not in st.session_state:
-        return
+                        # LogL 在部分版本/估计器下可能缺失：提示但允许生成
+                        if logl_empty:
+                            st.warning(
+                                "提示：LogL 当前为空（可能由 semopy 版本或拟合输出键名差异导致），"
+                                "其余字段将正常导出。"
+                            )
 
-    m_keys = list(st.session_state["cfa_multi_scenarios"].keys())
-    
-    # 彻底拦截防御点：确保列表不为空，绝对不让 st.tabs() 报错产生 Leakage 风险
-    if not m_keys:
-        st.error("❌ 非常抱歉，所勾选的量表即使经过 EFA 级精细去空洗涤，初始矩阵仍全部不收敛。请检查样本量是否过少。")
-        return
+                        # 协方差矩阵：题目按序号排序，对角线为方差（使用清洗后列名）
+                        sorted_items_clean = [item_clean_map.get(c, c) for c in sorted_items]
+                        df_cfa_ordered = df_cfa[[c for c in sorted_items_clean if c in df_cfa.columns]]
+                        cov_matrix = df_cfa_ordered.cov()
 
-    st.markdown("---")
-    st.markdown("### 🎯 第四步：0.90 达标优化方案大盘总览")
-    
-    global_summary = []
-    for m_id in m_keys:
-        bundle = st.session_state["cfa_multi_scenarios"][m_id]
-        s_data = bundle["final"]
-        cfg_meta = bundle["config"]
-        
-        fit_stats_df = s_data["result"][2]
-        rmsea_v = float(fit_stats_df.loc[fit_stats_df["Metric"] == "RMSEA", "Value"].values[0]) if "RMSEA" in fit_stats_df["Metric"].values else 0.0
-        srmr_v = float(fit_stats_df.loc[fit_stats_df["Metric"] == "SRMR", "Value"].values[0]) if "SRMR" in fit_stats_df["Metric"].values else 0.0
-        
-        initial_set = set(cfg_meta["initial_factor_items"])
-        current_set = set(s_data["items"])
-        deleted_items = list(initial_set - current_set)
-        deleted_items_sorted = sort_item_cols_by_number(deleted_items)
-        
-        status_tag = "✅ 已达标0.90" if s_data["cfi"] >= 0.90 and s_data["tli"] >= 0.90 else "⚠️ 未能完全达标"
-        
-        global_summary.append({
-            "量表维度ID": m_id,
-            "达标状态": status_tag,
-            "最终保留题数": f"{len(s_data['items'])} 题",
-            "CFI (目标>=0.9)": f"{s_data['cfi']:.4f}",
-            "TLI (目标>=0.9)": f"{s_data['tli']:.4f}",
-            "RMSEA": f"{rmsea_v:.4f}",
-            "SRMR": f"{srmr_v:.4f}",
-            "被剔除的题目": ", ".join(deleted_items_sorted) if deleted_items_sorted else "全量保留 (原状态即达标)"
-        })
-    st.dataframe(pd.DataFrame(global_summary), use_container_width=True, hide_index=True)
-    
-    st.markdown("---")
-    st.markdown("### 📑 独立 CFA 模型拟合报告展示区")
-    
-    # 横向切分渲染各量表独立卡片页，运行平稳稳健
-    report_tabs = st.tabs([f"📄 {k} 模型报告" for k in m_keys])
-    
-    for idx, m_id in enumerate(m_keys):
-        bundle = st.session_state["cfa_multi_scenarios"][m_id]
-        s_data = bundle["final"]
-        
-        model_obj, estimates, fit_stats = s_data["result"]
-        
-        with report_tabs[idx]:
-            st.markdown(f"#### 🔍 量表【{m_id}】CFA模型指标细节")
-            
-            st.markdown("**1. 模型拟合优度判定 (Model Fit Indices)**")
-            st.dataframe(fit_stats, use_container_width=True, hide_index=True)
-            
-            st.markdown("**2. 因子载荷与测量路径显著性检验 (Factor Loadings)**")
-            st.dataframe(estimates, use_container_width=True, hide_index=True)
-            
-            with st.expander("🪵 查看该量表全自动纯化删题轨迹 (Trace Log)", expanded=False):
-                for log in bundle["logs"]:
-                    dot = "🟢" if log["cfi"] >= 0.90 and log["tli"] >= 0.90 else "🔴"
-                    st.markdown(f"{dot} **步序 {log['step']}** | 剩余项数: `{len(log['items'])}` | **CFI**=`{log['cfi']:.4f}` | **TLI**=`{log['tli']:.4f}`")
-                    st.caption(f"动作: {log['msg']}")
+                        buf = io.BytesIO()
+                        with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
+                            # 固定 sheet 名，避免 measure_id 过长导致截断后重名覆盖
+                            sheet_items.to_excel(w, sheet_name="Items", index=False)
+                            cov_matrix.to_excel(w, sheet_name="Covariance", index=True)
+                        buf.seek(0)
+                        st.session_state.n2_excel_report_bytes = buf.getvalue()
+                        cfa_type = "prelim_single_cfa" if st.session_state.get("n2_prelim_single_cfa") else "single_cfa"
+                        safe_mid_for_file = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(mid)).strip(" .") or "measure"
+                        user_name = st.session_state.get("user_name", "unknown_user")
+                        safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
+                        today = date.today().strftime("%Y-%m-%d")
+                        st.session_state.n2_excel_report_filename = f"{safe_mid_for_file}_{cfa_type}_report_{today}_{safe_user}.xlsx"
+                        st.session_state.n2_report_sheet_items_preview = sheet_items.copy()
+                        st.session_state.n2_report_cov_preview = cov_matrix.copy()
+                        st.session_state.n2_cr_warning = cr_reason if (np.isnan(_to_num(cr_val)) and cr_reason) else ""
+                        st.success("已生成报告，请点击下方按钮下载。")
+                    except Exception as e:
+                        st.error(f"生成报告时出错: {e}")
+                        import traceback
+                        st.code(traceback.format_exc())
+
+            if st.session_state.get("n2_report_sheet_items_preview") is not None:
+                st.markdown("##### 预览：题目明细表（前20行）")
+                st.dataframe(
+                    st.session_state.n2_report_sheet_items_preview.head(20),
+                    use_container_width=True,
+                )
+            if st.session_state.get("n2_report_cov_preview") is not None:
+                st.markdown("##### 预览：题目协方差矩阵（前20行）")
+                st.dataframe(
+                    st.session_state.n2_report_cov_preview.head(20),
+                    use_container_width=True,
+                )
+            if st.session_state.get("n2_cr_warning"):
+                st.warning(st.session_state.n2_cr_warning)
+
+            if st.session_state.get("n2_excel_report_bytes"):
+                st.download_button(
+                    "⬇️ 下载 Excel 报告",
+                    data=st.session_state.n2_excel_report_bytes,
+                    file_name=st.session_state.get("n2_excel_report_filename", "measure_single_cfa_report.xlsx"),
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="n2_download_excel_report",
+                )
 
 
 
