@@ -1431,278 +1431,278 @@ def render_stage2_cfa_clean():
         
         # 🚀 3. 统一运行与批量调整控制台 (呈现在 Tabs 下方)
         # ==========================================================================
-    # 🎛️ 批量分析运行控制台 & 多量表独立分析展示区
-    # ==========================================================================
-    # 说明：从前面 tabs 结构中自动定位用户当前正在操作和核对的量表 sub_name。
-    # 为了保证多量表状态不冲突，我们将数据精准地提取并赋予你原有的变量名：
-    
-    if "cfa_ready_queue" in locals() and cfa_ready_queue and active_measure_ids:
-        # 默认将当前循环/选中的量表配置数据映射给原版变量名，实现无缝衔接
-        current_active_sub = active_measure_ids[index] # 动态跟随当前 Tab 容器 index
-        q_cfg = cfa_ready_queue[current_active_sub]
+        # 🎛️ 批量分析运行控制台 & 多量表独立分析展示区
+        # ==========================================================================
+        # 说明：从前面 tabs 结构中自动定位用户当前正在操作和核对的量表 sub_name。
+        # 为了保证多量表状态不冲突，我们将数据精准地提取并赋予你原有的变量名：
         
-        df_numeric = q_cfg["df_numeric"]
-        factor_name = q_cfg["factor_name"]
-        method_name = q_cfg["method_name"]
-        factor_items = q_cfg["factor_items"]
-        method_items = q_cfg["method_items"]
-    else:
-        # 兜底旧逻辑变量名（防错处理）
-        if "df_numeric" not in locals(): df_numeric = st.session_state.get("df_source")
-        if "factor_name" not in locals(): factor_name = "Factor1"
-        if "method_name" not in locals(): method_name = "Method"
-        if "factor_items" not in locals(): factor_items = []
-        if "method_items" not in locals(): method_items = []
-
-    # 🌟 以下为你提供的高保真原版代码层，原汁原味保留全部备注与多行字符串排序备用方案：
-
-    # --- 3. 模型拟合 ---
-    st.markdown("---")
-    # ✂️ 已根据要求移除 prelimCFA 勾选框及分列布局，直接呈现单按钮，干净直观
-    run_clicked = st.button("🚀 开始运行 CFA 分析", type="primary", key=f"run_main_cfa_btn_{sub_name}")
-    
-    if run_clicked:
-        if not factor_items:
-            st.error("❌ 错误：请至少为主因子选择 1 个题目。")
+        if "cfa_ready_queue" in locals() and cfa_ready_queue and active_measure_ids:
+            # 默认将当前循环/选中的量表配置数据映射给原版变量名，实现无缝衔接
+            current_active_sub = active_measure_ids[index] # 动态跟随当前 Tab 容器 index
+            q_cfg = cfa_ready_queue[current_active_sub]
+            
+            df_numeric = q_cfg["df_numeric"]
+            factor_name = q_cfg["factor_name"]
+            method_name = q_cfg["method_name"]
+            factor_items = q_cfg["factor_items"]
+            method_items = q_cfg["method_items"]
         else:
-            with st.spinner("正在拟合模型，请稍候..."):
-                factor_items_for_model = sort_item_cols_by_number(list(factor_items))
-                method_items_for_model = sort_item_cols_by_number(list(method_items)) if method_items else []
-                result, err_msg, syntax_used = run_cfa_gui(
-                    df_numeric, factor_name, factor_items_for_model, method_name, method_items_for_model
-                )
-                
-                if err_msg:
-                    st.error(err_msg)
-                    st.code(syntax_used, language="text")
-                else:
-                    model_obj, estimates, fit_stats = result
-                    st.success("✅ 模型拟合成功！")
-                    
-                    # 🚀 多量表隔离状态注入机制：利用 sub_name 隔离各 Tab 的运行成果，防止串号
-                    st.session_state[f"n2_estimates_{sub_name}"] = estimates
-                    st.session_state[f"n2_fit_stats_{sub_name}"] = fit_stats
-                    st.session_state[f"n2_syntax_{sub_name}"] = syntax_used
-                    st.session_state[f"n2_factor_name_{sub_name}"] = factor_name
-                    st.session_state[f"n2_method_name_{sub_name}"] = method_name
-                    
-                    # 同时保留对全局/下游基础下载、计分模块的原版兼容指针
-                    st.session_state.n2_estimates = estimates
-                    st.session_state.n2_fit_stats = fit_stats
-                    st.session_state.n2_syntax = syntax_used
-                    st.session_state.n2_factor_name = factor_name
-                    st.session_state.n2_method_name = method_name
-                    
-                    # 保存用于可下载报告：CFA 使用的数据与题目列表
-                    df_cfa_used = df_numeric[factor_items_for_model].dropna(axis=0)
-                    st.session_state.n2_df_cfa = df_cfa_used
-                    st.session_state.n2_factor_items = list(factor_items_for_model)
-                    st.session_state.n2_method_items = list(method_items_for_model)
-
-    # --- 4. 结果展示 ---
-    # 动态调取属于当前量表 Tab 容器的计算结果
-    if f'n2_fit_stats_{sub_name}' in st.session_state:
+            # 兜底旧逻辑变量名（防错处理）
+            if "df_numeric" not in locals(): df_numeric = st.session_state.get("df_source")
+            if "factor_name" not in locals(): factor_name = "Factor1"
+            if "method_name" not in locals(): method_name = "Method"
+            if "factor_items" not in locals(): factor_items = []
+            if "method_items" not in locals(): method_items = []
+    
+        # 🌟 以下为你提供的高保真原版代码层，原汁原味保留全部备注与多行字符串排序备用方案：
+    
+        # --- 3. 模型拟合 ---
         st.markdown("---")
-        st.subheader("2. 分析结果")
+        # ✂️ 已根据要求移除 prelimCFA 勾选框及分列布局，直接呈现单按钮，干净直观
+        run_clicked = st.button("🚀 开始运行 CFA 分析", type="primary", key=f"run_main_cfa_btn_{sub_name}")
         
-        stats_dict = st.session_state[f"n2_fit_stats_{sub_name}"]
-        
-        # 1. 关键指标高亮 (Top 8 Highlight)
-        st.markdown("###### 🏆 关键模型拟合指标 (Key Fit Indices)")
-        
-        def get_val(key):
-            val = stats_dict.get(key, np.nan)
-            return val if isinstance(val, (int, float)) else np.nan
-
-        metrics = {
-            "CFI": get_val("CFI"),
-            "TLI": get_val("TLI"),
-            "RMSEA": get_val("RMSEA"),
-            "SRMSR": get_val("SRMR"),
-            # 🆕 修改标签: Explicitly User Model
-            "Chi-Square (User Model)": get_val("chi2"),
-            "AIC": get_val("AIC"),
-            "BIC": get_val("BIC"),
-            "SABIC": get_val("SABIC")
-        }
-
-        m_cols1 = st.columns(4)
-        keys1 = ["CFI", "TLI", "RMSEA", "SRMSR"]
-        for i, k in enumerate(keys1):
-            val = metrics[k]
-            display_val = f"{val:.3f}" if not np.isnan(val) else "N/A"
-            m_cols1[i].metric(label=k, value=display_val)
-
-        st.markdown("") 
-        m_cols2 = st.columns(4)
-        # 🆕 修改标签列表
-        keys2 = ["Chi-Square (User Model)", "AIC", "BIC", "SABIC"] 
-        for i, k in enumerate(keys2):
-            val = metrics[k]
-            display_val = f"{val:.3f}" if not np.isnan(val) else "N/A"
-            m_cols2[i].metric(label=k, value=display_val)
-
-        # 2. 详细表格 (Estimates)
-        st.markdown("---")
-        t1, t2 = st.tabs(["📄 详细参数估计 (Estimates)", "🔍 完整拟合报告"])
-        
-        with t1:
-            #st.caption("Standardized Estimates (Std. Est) 为标准化载荷。")
-            st.caption("Latent Variables (Factor Loadings) & Covariances")
-            est_df = st.session_state[f"n2_estimates_{sub_name}"].copy() # 复制一份，避免修改原数据
-            # --- [新增] 排序逻辑 (Part 1-5) ---
-            fname = st.session_state[f"n2_factor_name_{sub_name}"]
-            mname = st.session_state[f"n2_method_name_{sub_name}"]
-            
-            def get_sort_rank(row):
-                lhs, op, rhs = row['LHS'], row['op'], row['RHS']
-                # Part 1: 每个题目 ~ 主因子 (op='=~', LHS=主因子)
-                if op == '=~' and lhs == fname: return 1
-                # Part 2: 每个题目 ~ 方法因子 (op='=~', LHS=方法因子)
-                if op == '=~' and lhs == mname: return 2
-                # Part 3: 主因子 ~ 主因子 (Variance: op='~~', LHS=RHS=主因子)
-                if op == '~~' and lhs == rhs and lhs == fname: return 3
-                # Part 4: 方法因子 ~ 方法因子 (Variance: op='~~', LHS=RHS=方法因子)
-                if op == '~~' and lhs == rhs and lhs == mname: return 4
-                # Part 5: 每个题目 ~ 每个题目 (Residuals: op='~~', LHS=RHS, LHS!=因子)
-                if op == '~~' and lhs == rhs and lhs not in [fname, mname]: return 5
-                
-                # 其他 (如 Covariance: Factor ~~ Method，放在最后)
-                return 6
-
-            # 应用排序
-            est_df['rank'] = est_df.apply(get_sort_rank, axis=1)
-            est_df = est_df.sort_values('rank').drop(columns=['rank'])
-            
-            # --- 格式化并显示 ---
-            numeric_cols = est_df.select_dtypes(include=[np.number]).columns
-            format_dict = {col: "{:.3f}" for col in numeric_cols}
-            
-            # 筛选展示列 (模仿 lavaan)
-            display_cols = ['LHS', 'op', 'RHS', 'Estimate', 'Std.Err', 'z-value', 'P(>|z|)', 'Std.all']
-            # 防止某些列不存在
-            final_cols = [c for c in display_cols if c in est_df.columns]
-            
-            st.dataframe(est_df[final_cols].style.format(format_dict))
-            
-            csv = est_df[final_cols].to_csv().encode('utf-8-sig')
-            st.download_button("📥 下载参数估计表", csv, f"cfa_estimates_{sub_name}.csv", "text/csv", key=f"dl_est_btn_{sub_name}")
-            
-            # 👇 100% 完整保留您原有的多行备份代码备用块1，一个字不改
-            '''
-            # === 🆕 新增：自定义排序逻辑 ===
-            # 获取运行分析时使用的因子名称
-            if 'n2_factor_names' in st.session_state:
-                trait_name, method_name = st.session_state.n2_factor_names
+        if run_clicked:
+            if not factor_items:
+                st.error("❌ 错误：请至少为主因子选择 1 个题目。")
             else:
-                # 兼容旧状态（以防万一）
-                trait_name, method_name = factor_name, method_name
-
-            def get_sort_rank(row):
-                lhs, op, rhs = row['LHS'], row['op'], row['RHS']
-                
-                # Rank 1: 每个题目 ~ 主因子 (Factor Loadings - Trait)
-                # op 是 =~, 左边是主因子名
-                if op == '=~' and lhs == trait_name:
-                    return 1
-                
-                # Rank 2: 每个题目 ~ 方法因子 (Factor Loadings - Method)
-                # op 是 =~, 左边是方法因子名
-                if op == '=~' and lhs == method_name:
-                    return 2
-                
-                # Rank 3: 主因子 ~ 主因子 (Latent Variance)
-                # op 是 ~~, 左右相等, 且是主因子
-                if op == '~~' and lhs == rhs and lhs == trait_name:
-                    return 3
-                
-                # Rank 4: 方法因子 ~ 方法因子 (Method Variance)
-                # op 是 ~~, 左右相等, 且是方法因子
-                if op == '~~' and lhs == rhs and lhs == method_name:
-                    return 4
-                
-                # Rank 5: 每个题目 ~ 每个题目 (Residuals: op='~~', LHS=RHS, LHS!=因子)
-                # op 是 ~~, 左右相等, 且不是因子名
-                if op == '~~' and lhs == rhs and lhs not in [trait_name, method_name]:
-                    return 5
-                
-                # 其他 (例如因子间的协方差，虽然这里设为0但也存在)
-                return 6
-
-            # 应用排序: 先按 Rank 排，Rank 相同的按 RHS (题目名) 排
-            est_df['Sort_Rank'] = est_df.apply(get_sort_rank, axis=1)
-            est_df = est_df.sort_values(by=['Sort_Rank', 'RHS'])
+                with st.spinner("正在拟合模型，请稍候..."):
+                    factor_items_for_model = sort_item_cols_by_number(list(factor_items))
+                    method_items_for_model = sort_item_cols_by_number(list(method_items)) if method_items else []
+                    result, err_msg, syntax_used = run_cfa_gui(
+                        df_numeric, factor_name, factor_items_for_model, method_name, method_items_for_model
+                    )
+                    
+                    if err_msg:
+                        st.error(err_msg)
+                        st.code(syntax_used, language="text")
+                    else:
+                        model_obj, estimates, fit_stats = result
+                        st.success("✅ 模型拟合成功！")
+                        
+                        # 🚀 多量表隔离状态注入机制：利用 sub_name 隔离各 Tab 的运行成果，防止串号
+                        st.session_state[f"n2_estimates_{sub_name}"] = estimates
+                        st.session_state[f"n2_fit_stats_{sub_name}"] = fit_stats
+                        st.session_state[f"n2_syntax_{sub_name}"] = syntax_used
+                        st.session_state[f"n2_factor_name_{sub_name}"] = factor_name
+                        st.session_state[f"n2_method_name_{sub_name}"] = method_name
+                        
+                        # 同时保留对全局/下游基础下载、计分模块的原版兼容指针
+                        st.session_state.n2_estimates = estimates
+                        st.session_state.n2_fit_stats = fit_stats
+                        st.session_state.n2_syntax = syntax_used
+                        st.session_state.n2_factor_name = factor_name
+                        st.session_state.n2_method_name = method_name
+                        
+                        # 保存用于可下载报告：CFA 使用的数据与题目列表
+                        df_cfa_used = df_numeric[factor_items_for_model].dropna(axis=0)
+                        st.session_state.n2_df_cfa = df_cfa_used
+                        st.session_state.n2_factor_items = list(factor_items_for_model)
+                        st.session_state.n2_method_items = list(method_items_for_model)
+    
+        # --- 4. 结果展示 ---
+        # 动态调取属于当前量表 Tab 容器的计算结果
+        if f'n2_fit_stats_{sub_name}' in st.session_state:
+            st.markdown("---")
+            st.subheader("2. 分析结果")
             
-            # 移除辅助列，准备展示
-            # 筛选我们关心的列 (模仿 lavaan 输出)
-            display_cols = ['LHS', 'op', 'RHS', 'Estimate', 'Std.Err', 'z-value', 'P(>|z|)', 'Std.all']
-            final_cols = [c for c in display_cols if c in est_df.columns]
-            est_display = est_df[final_cols].copy()
-            # =================================
+            stats_dict = st.session_state[f"n2_fit_stats_{sub_name}"]
             
-            # 只对数值列应用格式化
-            numeric_cols = est_display.select_dtypes(include=[np.number]).columns
-            format_dict = {col: "{:.3f}" for col in numeric_cols}
+            # 1. 关键指标高亮 (Top 8 Highlight)
+            st.markdown("###### 🏆 关键模型拟合指标 (Key Fit Indices)")
             
-            st.dataframe(est_display.style.format(format_dict))
+            def get_val(key):
+                val = stats_dict.get(key, np.nan)
+                return val if isinstance(val, (int, float)) else np.nan
+    
+            metrics = {
+                "CFI": get_val("CFI"),
+                "TLI": get_val("TLI"),
+                "RMSEA": get_val("RMSEA"),
+                "SRMSR": get_val("SRMR"),
+                # 🆕 修改标签: Explicitly User Model
+                "Chi-Square (User Model)": get_val("chi2"),
+                "AIC": get_val("AIC"),
+                "BIC": get_val("BIC"),
+                "SABIC": get_val("SABIC")
+            }
+    
+            m_cols1 = st.columns(4)
+            keys1 = ["CFI", "TLI", "RMSEA", "SRMSR"]
+            for i, k in enumerate(keys1):
+                val = metrics[k]
+                display_val = f"{val:.3f}" if not np.isnan(val) else "N/A"
+                m_cols1[i].metric(label=k, value=display_val)
+    
+            st.markdown("") 
+            m_cols2 = st.columns(4)
+            # 🆕 修改标签列表
+            keys2 = ["Chi-Square (User Model)", "AIC", "BIC", "SABIC"] 
+            for i, k in enumerate(keys2):
+                val = metrics[k]
+                display_val = f"{val:.3f}" if not np.isnan(val) else "N/A"
+                m_cols2[i].metric(label=k, value=display_val)
+    
+            # 2. 详细表格 (Estimates)
+            st.markdown("---")
+            t1, t2 = st.tabs(["📄 详细参数估计 (Estimates)", "🔍 完整拟合报告"])
             
-            csv = est_display.to_csv().encode('utf-8-sig')
-            st.download_button("📥 下载参数估计表", csv, "cfa_estimates.csv", "text/csv")
+            with t1:
+                #st.caption("Standardized Estimates (Std. Est) 为标准化载荷。")
+                st.caption("Latent Variables (Factor Loadings) & Covariances")
+                est_df = st.session_state[f"n2_estimates_{sub_name}"].copy() # 复制一份，避免修改原数据
+                # --- [新增] 排序逻辑 (Part 1-5) ---
+                fname = st.session_state[f"n2_factor_name_{sub_name}"]
+                mname = st.session_state[f"n2_method_name_{sub_name}"]
+                
+                def get_sort_rank(row):
+                    lhs, op, rhs = row['LHS'], row['op'], row['RHS']
+                    # Part 1: 每个题目 ~ 主因子 (op='=~', LHS=主因子)
+                    if op == '=~' and lhs == fname: return 1
+                    # Part 2: 每个题目 ~ 方法因子 (op='=~', LHS=方法因子)
+                    if op == '=~' and lhs == mname: return 2
+                    # Part 3: 主因子 ~ 主因子 (Variance: op='~~', LHS=RHS=主因子)
+                    if op == '~~' and lhs == rhs and lhs == fname: return 3
+                    # Part 4: 方法因子 ~ 方法因子 (Variance: op='~~', LHS=RHS=方法因子)
+                    if op == '~~' and lhs == rhs and lhs == mname: return 4
+                    # Part 5: 每个题目 ~ 每个题目 (Residuals: op='~~', LHS=RHS, LHS!=因子)
+                    if op == '~~' and lhs == rhs and lhs not in [fname, mname]: return 5
+                    
+                    # 其他 (如 Covariance: Factor ~~ Method，放在最后)
+                    return 6
+    
+                # 应用排序
+                est_df['rank'] = est_df.apply(get_sort_rank, axis=1)
+                est_df = est_df.sort_values('rank').drop(columns=['rank'])
+                
+                # --- 格式化并显示 ---
+                numeric_cols = est_df.select_dtypes(include=[np.number]).columns
+                format_dict = {col: "{:.3f}" for col in numeric_cols}
+                
+                # 筛选展示列 (模仿 lavaan)
+                display_cols = ['LHS', 'op', 'RHS', 'Estimate', 'Std.Err', 'z-value', 'P(>|z|)', 'Std.all']
+                # 防止某些列不存在
+                final_cols = [c for c in display_cols if c in est_df.columns]
+                
+                st.dataframe(est_df[final_cols].style.format(format_dict))
+                
+                csv = est_df[final_cols].to_csv().encode('utf-8-sig')
+                st.download_button("📥 下载参数估计表", csv, f"cfa_estimates_{sub_name}.csv", "text/csv", key=f"dl_est_btn_{sub_name}")
+                
+                # 👇 100% 完整保留您原有的多行备份代码备用块1，一个字不改
+                '''
+                # === 🆕 新增：自定义排序逻辑 ===
+                # 获取运行分析时使用的因子名称
+                if 'n2_factor_names' in st.session_state:
+                    trait_name, method_name = st.session_state.n2_factor_names
+                else:
+                    # 兼容旧状态（以防万一）
+                    trait_name, method_name = factor_name, method_name
+    
+                def get_sort_rank(row):
+                    lhs, op, rhs = row['LHS'], row['op'], row['RHS']
+                    
+                    # Rank 1: 每个题目 ~ 主因子 (Factor Loadings - Trait)
+                    # op 是 =~, 左边是主因子名
+                    if op == '=~' and lhs == trait_name:
+                        return 1
+                    
+                    # Rank 2: 每个题目 ~ 方法因子 (Factor Loadings - Method)
+                    # op 是 =~, 左边是方法因子名
+                    if op == '=~' and lhs == method_name:
+                        return 2
+                    
+                    # Rank 3: 主因子 ~ 主因子 (Latent Variance)
+                    # op 是 ~~, 左右相等, 且是主因子
+                    if op == '~~' and lhs == rhs and lhs == trait_name:
+                        return 3
+                    
+                    # Rank 4: 方法因子 ~ 方法因子 (Method Variance)
+                    # op 是 ~~, 左右相等, 且是方法因子
+                    if op == '~~' and lhs == rhs and lhs == method_name:
+                        return 4
+                    
+                    # Rank 5: 每个题目 ~ 每个题目 (Residuals: op='~~', LHS=RHS, LHS!=因子)
+                    # op 是 ~~, 左右相等, 且不是因子名
+                    if op == '~~' and lhs == rhs and lhs not in [trait_name, method_name]:
+                        return 5
+                    
+                    # 其他 (例如因子间的协方差，虽然这里设为0但也存在)
+                    return 6
+    
+                # 应用排序: 先按 Rank 排，Rank 相同的按 RHS (题目名) 排
+                est_df['Sort_Rank'] = est_df.apply(get_sort_rank, axis=1)
+                est_df = est_df.sort_values(by=['Sort_Rank', 'RHS'])
+                
+                # 移除辅助列，准备展示
+                # 筛选我们关心的列 (模仿 lavaan 输出)
+                display_cols = ['LHS', 'op', 'RHS', 'Estimate', 'Std.Err', 'z-value', 'P(>|z|)', 'Std.all']
+                final_cols = [c for c in display_cols if c in est_df.columns]
+                est_display = est_df[final_cols].copy()
+                # =================================
+                
+                # 只对数值列应用格式化
+                numeric_cols = est_display.select_dtypes(include=[np.number]).columns
+                format_dict = {col: "{:.3f}" for col in numeric_cols}
+                
+                st.dataframe(est_display.style.format(format_dict))
+                
+                csv = est_display.to_csv().encode('utf-8-sig')
+                st.download_button("📥 下载参数估计表", csv, "cfa_estimates.csv", "text/csv")
+                '''
+                
+            # 👇 100% 完整保留您原有的多行备份代码备用块2，一个字不改
+            '''    
+            with t2:
+                st.write("所有计算出的拟合指数：")
+                # 将字典转为 DataFrame 展示
+                fit_df_full = pd.DataFrame([stats_dict]).T
+                fit_df_full.columns = ["Value"]
+                
+                st.dataframe(fit_df_full.style.format("{:.3f}"))
+                
+                st.markdown("**生成的模型语法 (Syntax Used):**")
+                st.code(st.session_state.n2_syntax, language="text")
             '''
-            
-        # 👇 100% 完整保留您原有的多行备份代码备用块2，一个字不改
-        '''    
-        with t2:
-            st.write("所有计算出的拟合指数：")
-            # 将字典转为 DataFrame 展示
-            fit_df_full = pd.DataFrame([stats_dict]).T
-            fit_df_full.columns = ["Value"]
-            
-            st.dataframe(fit_df_full.style.format("{:.3f}"))
-            
-            st.markdown("**生成的模型语法 (Syntax Used):**")
-            st.code(st.session_state.n2_syntax, language="text")
-        '''
-        with t2:
-            st.write("### Model Test User Model:")
-            
-            # --- [新增] 单独展示 User Model Chi-Square ---
-            # semopy calc_stats 使用 DoF、chi2 p-value 等键名，兼容多种写法
-            def _get_any(d, keys, default=np.nan):
-                for k in keys:
-                    v = d.get(k, default)
-                    if v is not None and isinstance(v, (int, float)) and not (isinstance(v, float) and np.isnan(v)):
-                        return v
-                return default
-            chi2_val = _get_any(stats_dict, ['chi2', 'Chi2'])
-            dof_val = _get_any(stats_dict, ['DoF', 'dof', 'df'])
-            p_val = _get_any(stats_dict, ['chi2 p-value', 'p-value', 'pvalue', 'p_value'])
-            
-            # 构建特定格式的表格
-            model_test_df = pd.DataFrame({
-                "Statistic": ["Test statistic", "Degrees of freedom", "P-value (Chi-square)"],
-                "Value": [
-                    f"{chi2_val:.3f}" if not np.isnan(chi2_val) else "N/A",
-                    f"{int(dof_val)}" if not np.isnan(dof_val) else "N/A",
-                    f"{p_val:.4f}" if not np.isnan(p_val) else "N/A"
-                }
-            })
-            
-            st.table(model_test_df)
-            
-            st.write("### User Model versus Baseline Model:")
-            # 展示其他所有指标 (作为 Baseline 对比参考)
-            fit_df_full = pd.DataFrame([stats_dict]).T
-            fit_df_full.columns = ["Value"]
-            
-            # 安全格式化
-            num_cols_fit = fit_df_full.select_dtypes(include=[np.number]).columns
-            format_dict_fit = {col: "{:.3f}" for col in num_cols_fit}
-            
-            st.dataframe(fit_df_full.style.format(format_dict_fit))
-            
-            st.markdown("**生成的模型语法 (Syntax Used):**")
-            st.code(st.session_state[f"n2_syntax_{sub_name}"], language="text")
+            with t2:
+                st.write("### Model Test User Model:")
+                
+                # --- [新增] 单独展示 User Model Chi-Square ---
+                # semopy calc_stats 使用 DoF、chi2 p-value 等键名，兼容多种写法
+                def _get_any(d, keys, default=np.nan):
+                    for k in keys:
+                        v = d.get(k, default)
+                        if v is not None and isinstance(v, (int, float)) and not (isinstance(v, float) and np.isnan(v)):
+                            return v
+                    return default
+                chi2_val = _get_any(stats_dict, ['chi2', 'Chi2'])
+                dof_val = _get_any(stats_dict, ['DoF', 'dof', 'df'])
+                p_val = _get_any(stats_dict, ['chi2 p-value', 'p-value', 'pvalue', 'p_value'])
+                
+                # 构建特定格式的表格
+                model_test_df = pd.DataFrame({
+                    "Statistic": ["Test statistic", "Degrees of freedom", "P-value (Chi-square)"],
+                    "Value": [
+                        f"{chi2_val:.3f}" if not np.isnan(chi2_val) else "N/A",
+                        f"{int(dof_val)}" if not np.isnan(dof_val) else "N/A",
+                        f"{p_val:.4f}" if not np.isnan(p_val) else "N/A"
+                    }
+                })
+                
+                st.table(model_test_df)
+                
+                st.write("### User Model versus Baseline Model:")
+                # 展示其他所有指标 (作为 Baseline 对比参考)
+                fit_df_full = pd.DataFrame([stats_dict]).T
+                fit_df_full.columns = ["Value"]
+                
+                # 安全格式化
+                num_cols_fit = fit_df_full.select_dtypes(include=[np.number]).columns
+                format_dict_fit = {col: "{:.3f}" for col in num_cols_fit}
+                
+                st.dataframe(fit_df_full.style.format(format_dict_fit))
+                
+                st.markdown("**生成的模型语法 (Syntax Used):**")
+                st.code(st.session_state[f"n2_syntax_{sub_name}"], language="text")
 
     
 
