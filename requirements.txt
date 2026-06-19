@@ -4,9 +4,8 @@ matplotlib
 seaborn
 openpyxl
 XlsxWriter
-factor-analyzer
-scikit-learn
-factor-analyzer
+scikit-learn==1.5.2
+factor-analyzer==0.5.1
 streamlit
 pandas
 numpy
