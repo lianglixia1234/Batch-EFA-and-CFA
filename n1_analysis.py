@@ -905,15 +905,17 @@ def render_stage1_efa_clean():
                     ds_name_extracted = "preEFA_SubDataset"
                     real_measure_id = m_name
 
-                # 🌟【新增步骤 1】：先询问用户最终结果的 measure_id 是什么（允许用户交互修改）
+
+                # 🌟【步骤 1】：先询问用户最终结果的 measure_id 是什么（允许用户交互修改）
+                # 注意：此处的 final_measure_id 仅用于渲染表格第一列与 Excel 文件重命名，不污染底层 Key
                 final_measure_id = st.text_input(
-                    f"✍️ 请确认或修改量表【{real_measure_id}】最终用于导出的 `measure_id`名称:",
+                    f"✍️ 请确认或修改量表【{real_measure_id}】最终用于【报告导出】的展示名称:",
                     value=real_measure_id,
                     key=f"input_measure_id_{m_name}"
                 )
 
                 # ==============================================================
-                # 🚨 【核心升级点 2】：根据精准的 final_measure_id 生成独立 Excel 数据并预览
+                # 🚨 【核心修改】：根据展示名称和核心逻辑生成独立 Excel 数据并预览
                 # ==============================================================
                 try:
                     # 实时计算当前维度的多特征全量数据指标表
@@ -939,7 +941,7 @@ def render_stage1_efa_clean():
                         item_num = int(m_match.group(1)) if m_match else ""
                         
                         row = {
-                            "measure_id": final_measure_id,   # 🌟【超级核心修改】：这里直接写入用户最终确认/修改的 final_measure_id
+                            "measure_id": final_measure_id,   # 🌟【纯展示层】：仅在表格内呈现用户自定义的名称
                             "item_number": item_num,
                             "item_text": item_txt,
                             "reverse": rev,
@@ -959,39 +961,38 @@ def render_stage1_efa_clean():
                     # 构造仅包含本维度数据的独立 DataFrame
                     single_measure_df = pd.DataFrame(rows)
                     
-                    # 🌟【新增步骤 2】：在界面上呈现完整的表格供用户审查
-                    st.caption("📋 当前待导出的全量数据指标预览（第一列已动态更新）：")
+                    # 🌟【步骤 2】：在界面上呈现完整的表格供用户审查
+                    st.caption("📋 当前待导出的全量数据指标预览（第一列展示改名后效果，不影响系统运行）：")
                     st.dataframe(single_measure_df, use_container_width=True)
 
-                    # 🌟【新增步骤 3】：双重校验判断“最终ID”此前是否已被保存，用于初始化复选框状态
+                    # 🌟【步骤 3】：双重校验判断“对内原始 ID”此前是否已被保存，用于初始化复选框状态
                     is_previously_saved = (
                         ds_name_extracted in st.session_state.N1_preEFA and 
-                        final_measure_id in st.session_state.N1_preEFA[ds_name_extracted]
+                        real_measure_id in st.session_state.N1_preEFA[ds_name_extracted]  # 🔒 对齐系统内部真实短 ID
                     )
 
-                    # 🌟【新增步骤 4】：让用户点击复选框，确认数据及 measure_id 无误
+                    # 🌟【步骤 4】：让用户点击复选框确认数据无误
                     is_confirmed = st.checkbox(
-                        f"✅ 我已确认上述表格数据，并同意使用【{final_measure_id}】进行缓存与下载", 
+                        f"✅ 我已确认上述表格数据，并同意将该量表缓存同步至后续的 CFA 模块", 
                         value=is_previously_saved,
                         key=f"confirm_check_{m_name}"
                     )
 
                     # ==============================================================
-                    # 🚀 【后置联动】：用户勾选确认后，才解锁存储、清除以及下载按钮
+                    # 🚀 【后置联动】：用户勾选确认后，使用【原始 ID】进行对内闭环存储
                     # ==============================================================
                     if is_confirmed:
-                        # 1. 缓存逻辑
                         if ds_name_extracted not in st.session_state.N1_preEFA:
                             st.session_state.N1_preEFA[ds_name_extracted] = {}
                         
-                        # 使用用户最终决定的 final_measure_id 作为缓存的 Key
-                        st.session_state.N1_preEFA[ds_name_extracted][final_measure_id] = {
+                        # 🔒【超级核心修改】：对内永远且必须使用 real_measure_id（最开始创建的ID）作为 Key
+                        st.session_state.N1_preEFA[ds_name_extracted][real_measure_id] = {
                             "kept_items": list(kept),      # N1 过滤后确认保留的题目
                             "n_factors": int(n_factors),   # N1 模型推荐提取的因子数
                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                             "clean_df": df_final          # 清洗删题后的真实 DataFrame
                         }
-                        st.toast(f"🟢 已成功将【{final_measure_id}】同步缓存！")
+                        st.toast(f"🟢 【{real_measure_id}】内部状态已同步锁定！")
 
                         # 2. 编译并输出 Excel 下载组件
                         single_buf = io.BytesIO()
@@ -1001,7 +1002,7 @@ def render_stage1_efa_clean():
                         
                         today_str = date.today().strftime("%Y-%m-%d")
                         safe_measure_id = "".join(c for c in final_measure_id if c not in '[]:*?/\\ ')
-                        file_filename = f"EFA_Report_{safe_measure_id}_{today_str}.xlsx"
+                        file_filename = f"EFA_Report_{safe_measure_id}_{today_str}.xlsx"  # 文件名享受个性化长改名
                         
                         st.download_button(
                             label=f"⬇️ 立即下载 【{final_measure_id}】 维度的独立 Excel 报告",
@@ -1011,29 +1012,29 @@ def render_stage1_efa_clean():
                             key=f"download_btn_single_{m_name}"
                         )
                     else:
-                        # 用户未勾选或取消勾选时，动态移除该最终ID的缓存
+                        # 用户未勾选或取消勾选时，动态移除该【内部真实 ID】的缓存
                         if ds_name_extracted in st.session_state.N1_preEFA:
-                            if final_measure_id in st.session_state.N1_preEFA[ds_name_extracted]:
-                                del st.session_state.N1_preEFA[ds_name_extracted][final_measure_id]
-                        st.info("💡 请检查上方预览表，确认无误后勾选上方“✅ 我已确认...”复选框以进行下载和全局缓存。")
+                            if real_measure_id in st.session_state.N1_preEFA[ds_name_extracted]:
+                                del st.session_state.N1_preEFA[ds_name_extracted][real_measure_id]
+                        st.info("💡 请检查上方预览表，确认无误后勾选上方“✅ 我已确认...”复选框以激活下载。")
 
                 except Exception as ex_build:
                     st.caption(f"⚠️ 该维度的 Excel 独立导出表编译受限: {ex_build}")
 
         # ==========================================================================
-        # 6. 页面最底部全局大看板：实时监测并预览 N1_preEFA 配置资产状态
+        # 6. 页面最底部全局大看板：实时监测并预览 N1_preEFA 配置资产状态（展示原生干净结构）
         # ==========================================================================
         if st.session_state.N1_preEFA:
             st.markdown("---")
             with st.expander("🚀 查看当前准备对接 Batch CFA 的 `N1_preEFA` 全局资产清单", expanded=True):
-                st.success("📊 已成功缓存中，后续 preCFA模块将调取这些数据：")
+                st.success("📊 内部数据注册成功，后续分析流将调取这些纯净 ID 键值对：")
                 
                 for d_key, m_dict in st.session_state.N1_preEFA.items():
                     st.markdown(f"#### 📦 数据集容器: `{d_key}`")
                     for sub_m, config in m_dict.items():
                         st.markdown(
-                            f" * 🟢 **{sub_m}** ── 保留题目: `{len(config['kept_items'])}` 题 | "
-                            f"推荐 CFA 验证潜变量/因子数: `{config['n_factors']}` | *更新时间: {config['timestamp']}*"
+                            f" * 🟢 内部原生标志: **`{sub_m}`** ── 保留题目: `{len(config['kept_items'])}` 题 | "
+                            f"推荐 CFA 验证潜变量数: `{config['n_factors']}` | *更新时间: {config['timestamp']}*"
                         )
 
 
@@ -1041,12 +1042,7 @@ def render_stage1_efa_clean():
 
 # 🧪 2. 自动删题 CFA 板块
 # ==============================================================================
-import streamlit as st
-import pandas as pd
-import numpy as np
-import re
-import io
-from datetime import date
+
 
 def render_stage2_cfa_clean():
     """
