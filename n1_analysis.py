@@ -1628,13 +1628,13 @@ def render_stage2_cfa_clean():
                     st.markdown(f"##### 【{sub_name}】自动删题记录")
                     log_records = []
                     for log in trace_logs:
-                        log_records.append({
+                        log_records.append({
                             "轮次": f"第 {log['round']} 轮",
                             "当前保留题数": f"{log['items_count']} 题",
                             "CFI 拟合度": f"{log['cfi']:.3f}" if isinstance(log['cfi'], (int, float)) else "N/A",
                             "TLI 拟合度": f"{log['tli']:.3f}" if isinstance(log['tli'], (int, float)) else "N/A",
                             "剔除题目": log['deleted_item']
-                        })
+                         })
                     st.table(pd.DataFrame(log_records))
                     
                     # 2. 🏆 关键模型拟合指标看板
