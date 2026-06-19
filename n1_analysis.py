@@ -1006,7 +1006,7 @@ def render_stage1_efa_clean():
                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                             "clean_df": df_final          # 清洗删题后的真实 DataFrame
                         }
-                        st.toast(f"🟢 【{real_measure_id}】内部状态已同步锁定！")
+                        st.toast(f"🟢 【{real_measure_id}】")
 
                         # 2. 编译并输出 Excel 下载组件
                         single_buf = io.BytesIO()
@@ -1040,15 +1040,13 @@ def render_stage1_efa_clean():
         # ==========================================================================
         if st.session_state.N1_preEFA:
             st.markdown("---")
-            with st.expander("🚀 查看当前准备对接 Batch CFA 的 `N1_preEFA` 全局资产清单", expanded=True):
-                st.success("📊 内部数据注册成功，后续分析流将调取这些纯净 ID 键值对：")
+            with st.expander("🚀 查看当前准备对接 Batch CFA 的 `N1_preEFA` 清单", expanded=True):
                 
                 for d_key, m_dict in st.session_state.N1_preEFA.items():
                     st.markdown(f"#### 📦 数据集容器: `{d_key}`")
                     for sub_m, config in m_dict.items():
                         st.markdown(
-                            f" * 🟢 内部原生标志: **`{sub_m}`** ── 保留题目: `{len(config['kept_items'])}` 题 | "
-                            f"推荐 CFA 验证潜变量数: `{config['n_factors']}` | *更新时间: {config['timestamp']}*"
+                            f" * 🟢 内部原生标志: **`{sub_m}`** ── 保留题目: `{len(config['kept_items'])}` 题 "
                         )
 
 # CFA 核心算法区域
@@ -1433,7 +1431,6 @@ def render_stage2_cfa_clean():
         
         # 🚀 3. 统一运行与批量调整控制台 (呈现在 Tabs 下方)
         st.markdown("---")
-        st.markdown("### 🎛️ 批量分析运行控制台")
         st.info(f"📋 当前标签页中已就绪的量表队列: `{', '.join(list(cfa_ready_queue.keys()))}`")
         
         ctrl_col1, ctrl_col2 = st.columns([1, 1])
