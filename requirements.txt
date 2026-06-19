@@ -5,7 +5,7 @@ seaborn
 openpyxl
 XlsxWriter
 factor-analyzer
-scikit-learn==1.5.2
+scikit-learn
 factor-analyzer
 streamlit
 pandas
