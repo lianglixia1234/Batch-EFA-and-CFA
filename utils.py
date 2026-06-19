@@ -4,6 +4,20 @@ import pandas as pd
 import re
 import unicodedata
 
+def cronbach_alpha(df: pd.DataFrame) -> float:
+    """计算 Cronbach's Alpha (基于 statsCriteriaCheck.py)"""
+    # 确保只处理数值且无缺失
+    df = df.select_dtypes(include=[np.number]).dropna()
+    k = df.shape[1]
+    if k < 2:
+        return np.nan
+    item_vars = df.var(axis=0, ddof=1)
+    total_var = df.sum(axis=1).var(ddof=1)
+    # 防止分母为0
+    if total_var == 0:
+        return 0.0
+    alpha = (k / (k - 1)) * (1 - item_vars.sum() / total_var)
+    return alpha
 
 def normalize_item_text(text):
     """题目文本规范化，用于 EFA/CFA 题目匹配：去首尾空格、统一标点（全角转半角）。"""
