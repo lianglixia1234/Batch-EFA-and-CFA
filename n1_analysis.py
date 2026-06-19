@@ -1491,7 +1491,7 @@ def render_stage2_cfa_clean():
             
             while current_step <= max_steps:
                 if len(active_factor_items) < min_items_limit:
-                    status_holder.warning(f"⚠️ 【{sub_name}】触发安全熔断：当前主因子题目数已降至下限 ({min_items_limit} 题)，停止自动纯化。")
+                    status_holder.warning(f"⚠️ 【{sub_name}】触发安全熔断：当前主因子题目数已降至下限 ({min_items_limit} 题)，停止")
                     break
                         
                 status_holder.info(f"🔄 正在运行【{sub_name}】第 **{current_step}** 轮 CFA 拟合评估 (当前主因子剩余: `{len(active_factor_items)}` 题)...")
@@ -1637,21 +1637,20 @@ def render_stage2_cfa_clean():
                     
                     # 1. 自动纯化日志面板渲染 (Trace Log)
                     trace_logs = st.session_state[f"n2_trace_logs_{sub_name}"]
-                    st.markdown(f"##### 🪵 【{sub_name}】自动纯化删题追踪面板")
+                    st.markdown(f"##### 【{sub_name}】自动删题记录")
                     log_records = []
                     for log in trace_logs:
                         log_records.append({
-                            "纯化轮次": f"第 {log['round']} 轮",
+                            "轮次": f"第 {log['round']} 轮",
                             "当前保留题数": f"{log['items_count']} 题",
                             "CFI 拟合度": f"{log['cfi']:.3f}",
                             "TLI 拟合度": f"{log['tli']:.3f}",
-                            "系统纯化决策": log['action'],
-                            "被淘汰剔除题目": log['deleted_item']
+                            "剔除题目": log['deleted_item']
                         })
                     st.table(pd.DataFrame(log_records))
                     
                     # 2. 🏆 关键模型拟合指标看板 (Top 8 Highlight)
-                    st.markdown("###### 🏆 关键模型拟合指标 (Key Fit Indices)")
+                    st.markdown("###### 🏆 关键模型拟合指标")
                     stats_dict = st.session_state[f"n2_fit_stats_{sub_name}"]
                     
                     def get_val(key):
