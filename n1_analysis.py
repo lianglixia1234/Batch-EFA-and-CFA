@@ -1763,7 +1763,7 @@ def render_stage2_cfa_clean():
                             f"{chi2_val:.3f}" if not np.isnan(chi2_val) else "N/A",
                             f"{int(dof_val)}" if not np.isnan(dof_val) else "N/A",
                             f"{p_val:.4f}" if not np.isnan(p_val) else "N/A"
-                        }
+                        ]
                     })
                     st.table(model_test_df)
                     
