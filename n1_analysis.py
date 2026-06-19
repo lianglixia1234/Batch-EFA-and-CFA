@@ -1157,10 +1157,10 @@ def render_stage2_cfa_clean():
         with st.expander(f"👀 核对量表 【{sub_name}】 的因子架构", expanded=True):
             audit_col1, audit_col2 = st.columns(2)
             with audit_col1:
-                st.markdown(f"**🅰️ 主因子特质项 (`{sub_name}_Trait`)**")
+                st.markdown(f"**🅰️ 主因子特质项 (`{sub_name}`)**")
                 st.code("\n".join([f" ├─ {item}" for item in sorted_items]), language="text")
             with audit_col2:
-                st.markdown(f"**🅱️ 逆向方法因子项 (`{sub_name}_Method`)**")
+                st.markdown(f"**🅱️ 逆向方法因子项 (`_Method`)**")
                 if auto_detected_reverse_items:
                     st.code("\n".join([f" ├─ {item}" for item in auto_detected_reverse_items]), language="text")
                 else:
