@@ -1560,8 +1560,7 @@ def render_stage2_cfa_clean():
                         "round": current_step, "items_count": len(active_factor_items),
                         "cfi": cfi_val, "tli": tli_val,
                         "action": f"❌ 拟合未达标(CFI:{cfi_val:.3f}, TLI:{tli_val:.3f})，剔除主载荷最弱题",
-                        "deleted_item": worst_raw_item,
-                        "items": list(current_items)  # 👈 必须在这里先存入，上面 log_records 才能读取到！
+                        "deleted_item": worst_raw_item
                     })
                     
                     active_factor_items.remove(worst_raw_item)
@@ -1571,7 +1570,7 @@ def render_stage2_cfa_clean():
                     trace_logs.append({
                         "round": current_step, "items_count": len(active_factor_items),
                         "cfi": cfi_val, "tli": tli_val,
-                        "action": "⚠️ 未能捕获到有效的主载荷路径，终止", "deleted_item": "未知","items": list(current_items)  # 👈 必须在这里先存入，上面 log_records 才能读取到！
+                        "action": "⚠️ 未能捕获到有效的主载荷路径，终止", "deleted_item": "未知"
                     })
                     break
                         
@@ -1634,9 +1633,7 @@ def render_stage2_cfa_clean():
                             "当前保留题数": f"{log['items_count']} 题",
                             "CFI 拟合度": f"{log['cfi']:.3f}" if isinstance(log['cfi'], (int, float)) else "N/A",
                             "TLI 拟合度": f"{log['tli']:.3f}" if isinstance(log['tli'], (int, float)) else "N/A",
-                            "剔除题目": log['deleted_item'],
-                            # 👇 新增：记录当前轮次保留下来的具体题目，用逗号连接成字符串方便表格展示
-                            "当前保留题目明细": ", ".join(log['items']) if isinstance(log.get('items'), list) else str(log.get('items', 'N/A'))
+                            "剔除题目": log['deleted_item']
                         })
                     st.table(pd.DataFrame(log_records))
                     
