@@ -1227,7 +1227,8 @@ def run_cfa_gui(df, factor_name, factor_items, method_name, method_items):
 
 # ==============================================================================
 # 🧪 2. 自动删题 CFA 版
-# ==============================================================================
+
+
 def render_stage2_cfa_clean():
     # 🧬 1. 精准读取上游 EFA 资产与底层实体数据
     # ==========================================================================
@@ -1241,7 +1242,6 @@ def render_stage2_cfa_clean():
         for ds_key, measure_dict in n1_asset.items():
             if isinstance(measure_dict, dict):
                 for m_id, m_config in measure_dict.items():
-                    # 🌟 核心联动：精准提取 EFA 留下来的结果
                     if isinstance(m_config, dict) and "kept_items" in m_config:
                         raw_df_entity = m_config.get("clean_df")
                         
@@ -1253,9 +1253,8 @@ def render_stage2_cfa_clean():
                             else:
                                 raw_df_entity = st.session_state.get("df_source")
                         
-                        # 将 EFA 保留的题目作为 CFA 的初始分析目标
                         all_upstream_measures[str(m_id)] = {
-                            "items": m_config["kept_items"],  # 👈 EFA 过滤后的纯净题目
+                            "items": m_config["kept_items"],  
                             "clean_df": raw_df_entity,        
                             "measure_id_raw": m_id,
                             "ds_key": ds_key
@@ -1281,103 +1280,59 @@ def render_stage2_cfa_clean():
         st.warning("⚠️ 请至少勾选一个量表以继续分析。")
         return
 
-    sub_datasets = {k: all_upstream_measures[k] for k in selected_measure_ids}
+    # 📥 阈值与兜底限制设置（全局变量，确保下文循环能正确读取）
+    min_items_limit = st.number_input(
+        "🛑 最小保留题目底线",
+        min_value=3, max_value=30, value=5, step=1,
+        help="当维度内题目数减少到该值时，算法必须触发强制安全保护停止删题，防止被删空。"
+    )
 
-    # 阈值与兜底限制设置
-    col_param1 = st.columns(1)[0]
-    with col_param1:
-        min_items_limit = st.number_input(
-            "🛑 最小保留题目底线",
-            min_value=3, max_value=30, value=8, step=1,
-            help="当维度内题目数减少到该值时，算法必须触发强制安全保护停止删题，防止被删空。"
-        )
-
-    
-    
-
-
-
-    
-    # 🛠️ 第二步：CFA 测量模型结构核对看板 (Tabs 标签切换版)
     # ==========================================================================
-    st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对")
+    # 🛠️ 第二步：CFA 测量模型结构核对看板 (修复全局锁定与状态打通)
+    # ==========================================================================
+    st.markdown("---")
+    st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对与锁定")
+    st.caption("请依次切入下方各个量表标签页，核对或调整其因子结构配置。")
     
-    # 🧬 1. 读取并解析批量量表底层资产 (联动上游结构)
-    all_upstream_measures = {}
-    n1_asset = st.session_state.get("N1_preEFA")
+    active_measure_ids = selected_measure_ids
+    cfa_ready_queue = {}  # 准备队列缓存
     
-    if isinstance(n1_asset, dict) and n1_asset:
-        for ds_key, measure_dict in n1_asset.items():
-            if isinstance(measure_dict, dict):
-                for m_id, m_config in measure_dict.items():
-                    if isinstance(m_config, dict) and "kept_items" in m_config:
-                        raw_df_entity = m_config.get("clean_df")
-                        if raw_df_entity is None:
-                            if "sub_datasets" in st.session_state and ds_key in st.session_state.sub_datasets:
-                                raw_df_entity = st.session_state.sub_datasets[ds_key]
-                            else:
-                                raw_df_entity = st.session_state.get("df_source")
-                        
-                        all_upstream_measures[str(m_id)] = {
-                            "items": m_config["kept_items"],
-                            "clean_df": raw_df_entity,
-                            "ds_key": ds_key
-                        }
-    elif 'efa_suggested_structure' in st.session_state:
-        structure = st.session_state.efa_suggested_structure
-        if isinstance(structure, dict):
-            for factor_key, items_list in structure.items():
-                all_upstream_measures[str(factor_key)] = {
-                    "items": items_list,
-                    "clean_df": st.session_state.get("df_source"),
-                    "ds_key": "default"
-                }
-    
-    if not all_upstream_measures:
-        st.info("💡 暂未检测到上游 EFA 留存的题目资产结构。已自动使用当前数据集的全部列作为默认量表池。")
-        current_df = st.session_state.get("df_source")
-        all_items_pool = list(current_df.columns) if current_df is not None else []
-        all_upstream_measures["Default_Measure"] = {"items": all_items_pool, "clean_df": current_df, "ds_key": "default"}
-    
-    # 📂 允许用户筛选参与核对的量表
-    active_measure_ids = list(all_upstream_measures.keys())
-    
-    # 🌟 核心改动：使用 st.tabs 动态创建量表切换标签页
     if active_measure_ids:
-        tabs = st.tabs([f"{m_id}" for m_id in active_measure_ids])
+        tabs = st.tabs([f"⚙️ {m_id}" for m_id in active_measure_ids])
         
-        # 建立全局就绪队列缓存，供后续批量运行按钮直接提取
-        cfa_ready_queue = {}
-        
-        # 🔄 2. 遍历标签页，每个 Tab 内独立配置一个量表的结构
         for index, sub_name in enumerate(active_measure_ids):
             with tabs[index]:
                 asset_body = all_upstream_measures[sub_name]
-                all_items = sort_item_cols_by_number(list(asset_body.get("items", [])))
+                # 兼容外部排序函数，若无则降级为原生 sorted
+                try:
+                    all_items = sort_item_cols_by_number(list(asset_body.get("items", [])))
+                except NameError:
+                    all_items = sorted(list(asset_body.get("items", [])))
                 
-                st.markdown(f"#### ⚙️ 配置 【{sub_name}】 的因子结构")
+                st.markdown(f"#### 📐 量表 【{sub_name}】 模型架构")
                 
                 col1, col2 = st.columns(2)
                 with col1:
                     st.markdown("##### 🅰️ 主因子 (Trait Factor)")
                     factor_name = st.text_input(
-                        "给主因子起个名 (英文):", 
+                        "主因子名称 (英文/标识符):", 
                         value=f"{sub_name}", 
                         key=f"cfa_fname_inp_{sub_name}"
                     )
                     
+                    # 联动 smart_multiselect 并通过组件分配的 key 将状态捕获
                     factor_items = smart_multiselect(
                         options=all_items,
                         label=f"选择属于 {factor_name} 的题目",
                         key_suffix=f"cfa_factor_{sub_name}",
-                        default_selected=all_items, # 默认预选 EFA 留下来的全部题目
+                        default_selected=all_items, 
                         show_selection_controls=True,
                     )
-    
+                
                 with col2:
                     st.markdown("##### 🅱️ 方法因子 (Method Factor)")
                     method_name = st.text_input(
-                        "给方法因子起个名 (英文):", 
+                        "方法因子名称 (英文/标识符):", 
                         value=f"Method", 
                         key=f"cfa_mname_inp_{sub_name}"
                     )
@@ -1387,39 +1342,36 @@ def render_stage2_cfa_clean():
                     method_sig_key = f"{method_key_suffix}_options_sig"
                     method_options_sig = tuple(method_options)
                     
-                    # 智能缓存判定与清理
                     if st.session_state.get(method_sig_key) != method_options_sig:
-                        if '_reset_smart_multiselect_cache' in globals() or '_reset_smart_multiselect_cache' in locals():
+                        if '_reset_smart_multiselect_cache' in locals() or '_reset_smart_multiselect_cache' in globals():
                             _reset_smart_multiselect_cache(method_key_suffix)
                         st.session_state[method_sig_key] = method_options_sig
                     
-                    # 规则自动预选
-                    default_method_items = [x for x in method_options if _is_reverse_coded(x)] if method_options else []
-                    st.caption("已根据统一规则（题目末尾为 r）自动预选方法因子题目。")
+                    # 规则自动预选降级机制
+                    try:
+                        default_method_items = [x for x in method_options if _is_reverse_coded(x)] if method_options else []
+                    except NameError:
+                        default_method_items = [x for x in method_options if str(x).endswith('r')] if method_options else []
+                        
+                    st.caption("💡 提示：默认已自动预选末尾为 'r' 的反向题至方法因子。")
                     
-                    # 闭包重置回调函数
                     def _on_reset_method_tab(k_suffix=method_key_suffix, sig_val=method_options_sig, def_items=default_method_items):
-                        if '_reset_smart_multiselect_cache' in globals() or '_reset_smart_multiselect_cache' in locals():
+                        if '_reset_smart_multiselect_cache' in locals() or '_reset_smart_multiselect_cache' in globals():
                             _reset_smart_multiselect_cache(k_suffix)
                         st.session_state[f"{k_suffix}_options_sig"] = sig_val
                         st.session_state[f"{k_suffix}_last_selected"] = def_items
     
-                    st.button(
-                        '🔄 重新预选方法因子题目', 
-                        key=f"tab_btn_reset_method_{sub_name}",
-                        on_click=_on_reset_method_tab
-                    )
+                    st.button('🔄 重新预选方法因子题目', key=f"tab_btn_reset_method_{sub_name}", on_click=_on_reset_method_tab)
                     
                     method_items = smart_multiselect(
                         options=method_options,
-                        label=f"选择受到 {method_name} 影响的题目",
+                        label=f"选择受 {method_name} 影响的反向题目(选空则不启用)",
                         key_suffix=method_key_suffix,
                         default_selected=default_method_items,
                         show_selection_controls=True,
                     )
                 
-                
-                # 安全压入全局准备队列缓存
+                # 🔒 将当前配置压入就绪队列（打通多 Tab 状态的绝对关键点）
                 if factor_items:
                     cfa_ready_queue[sub_name] = {
                         "asset_body": asset_body,
@@ -1429,66 +1381,58 @@ def render_stage2_cfa_clean():
                         "factor_items": list(factor_items),
                         "method_items": list(method_items) if method_items else []
                     }
-        
-        # 🚀 3. 统一运行与批量调整控制台 (呈呈现在 Tabs 下方)
-        # ==========================================================================
-        if "cfa_ready_queue" in locals() and cfa_ready_queue and active_measure_ids:
-            current_active_sub = active_measure_ids[index] # 动态跟随当前 Tab 容器 index
-            q_cfg = cfa_ready_queue[current_active_sub]
-            
-            df_numeric = q_cfg["df_numeric"]
-            factor_name = q_cfg["factor_name"]
-            method_name = q_cfg["method_name"]
-            factor_items = q_cfg["factor_items"]
-            method_items = q_cfg["method_items"]
-        else:
-            if "df_numeric" not in locals(): df_numeric = st.session_state.get("df_source")
-            if "factor_name" not in locals(): factor_name = "Factor1"
-            if "method_name" not in locals(): method_name = "Method"
-            if "factor_items" not in locals(): factor_items = []
-            if "method_items" not in locals(): method_items = []
-    
-    
 
+        # 💡 新增机制：强制锁定与校验控制台
+        st.markdown("---")
+        st.info("📌 **核对完毕后，请点击下方确认锁定按钮**。系统将把您在上方各 Tab 中挑选的最新模型结构固化存入后台，以供引擎批量处理。")
+        lock_confirmed = st.button("🔒 确认并锁定所有量表模型结构配置", type="secondary", use_container_width=True)
+        if lock_confirmed:
+            st.session_state["cfa_locked_config"] = cfa_ready_queue
+            st.toast("✅ 各量表模型配置已成功锁入后台！现在可以开始运行分析了。", icon="👀")
 
-
-    # --- 3. 模型拟合 (多量表独立 Tab 呈现 - 自动纯化删题版) ---
-    st.markdown("---")
-    run_all_clicked = st.button("🚀 开始运行 所有量表自动删题CFA 分析", type="primary", key="run_all_cfa_global_btn")
+    # ==============================================================================
+    # 🚀 3. 模型拟合运算层 (多量表自动纯化删题引擎)
+    # ==============================================================================
+    st.markdown("### 🚀 第三步：开启自动化 CFA 删题引擎")
+    run_all_clicked = st.button("🔥 开始运行所有量表自动删题 CFA 分析", type="primary", key="run_all_cfa_global_btn")
     
     if run_all_clicked:
+        # 优先级：首选锁定的配置，若用户没点锁定，降级从当前页面状态变量中实时抓取
+        saved_queue = st.session_state.get("cfa_locked_config", cfa_ready_queue)
+        
+        if not saved_queue:
+            st.error("❌ 运行失败：未能捕获到有效的量表模型配置结构，请检查上方第一步与第二步的选择。")
+            return
+            
         global_status = st.empty()
         status_holder = st.empty()
         
-        # 🌟 起点记忆清洗：一旦开始新一轮批量运行，立刻定点清洗该板块历史残留指标，杜绝错位
+        # 🌟 起点记忆清洗：杜绝历史残留导致的错位
         for k in list(st.session_state.keys()):
             if k.startswith("n2_") and not k.endswith("_btn"):
                 del st.session_state[k]
         
-        # 🔄 修改 3：遍历所有选中的量表进行批量离线计算
-        for sub_name in active_measure_ids:
-            factor_items = st.session_state.get(f"factor_items_{sub_name}", [])
-            method_items = st.session_state.get(f"method_items_{sub_name}", [])
-            factor_name = st.session_state.get(f"factor_name_{sub_name}", "Factor")
-            method_name = st.session_state.get(f"method_name_{sub_name}", "Method")
+        # 🔄 遍历所有就绪队列中的量表进行流水线离线计算
+        for sub_name, config_payload in saved_queue.items():
             
-            if not factor_items:
-                if "cfa_ready_queue" in locals() and sub_name in cfa_ready_queue:
-                    factor_items = cfa_ready_queue[sub_name]["factor_items"]
-                    method_items = cfa_ready_queue[sub_name]["method_items"]
-                    factor_name = cfa_ready_queue[sub_name]["factor_name"]
-                    method_name = cfa_ready_queue[sub_name]["method_name"]
-                else:
-                    st.warning(f"⚠️ 量表【{sub_name}】未配置主因子题目，已跳过。")
-                    continue
-                
+            # 从锁定的 Payload 中精准提取结构，解决问题②
+            df_numeric = config_payload["df_numeric"]
+            factor_name = config_payload["factor_name"]
+            method_name = config_payload["method_name"]
+            factor_items = config_payload["factor_items"]
+            method_items = config_payload["method_items"]
+            
             trace_logs = []
             current_step = 1
             max_steps = 20  
-            min_items_limit = 3  
             
-            active_factor_items = sort_item_cols_by_number(list(factor_items))
-            active_method_items = sort_item_cols_by_number(list(method_items)) if method_items else []
+            # 兼容外部排序机制
+            try:
+                active_factor_items = sort_item_cols_by_number(list(factor_items))
+                active_method_items = sort_item_cols_by_number(list(method_items)) if method_items else []
+            except NameError:
+                active_factor_items = sorted(list(factor_items))
+                active_method_items = sorted(list(method_items)) if method_items else []
             
             final_result = None
             final_err_msg = None
@@ -1496,9 +1440,10 @@ def render_stage2_cfa_clean():
             final_name_mapping = {}
             final_reverse_mapping = {}
             
+            # 🔄 删题核心外层循环
             while current_step <= max_steps:
                 if len(active_factor_items) < min_items_limit:
-                    status_holder.warning(f"⚠️ 【{sub_name}】触发安全熔断：当前主因子题目数已降至下限 ({min_items_limit} 题)，停止")
+                    status_holder.warning(f"⚠️ 【{sub_name}】触发安全熔断：当前主因子题目数已降至下限 ({min_items_limit} 题)，停止删题。")
                     break
                         
                 status_holder.info(f"🔄 正在运行【{sub_name}】第 **{current_step}** 轮 CFA 拟合评估 (当前主因子剩余: `{len(active_factor_items)}` 题)...")
@@ -1507,35 +1452,50 @@ def render_stage2_cfa_clean():
                 name_mapping = {item: f"v{idx + 1}" for idx, item in enumerate(unique_all_items)}
                 reverse_mapping = {f"v{idx + 1}": item for idx, item in enumerate(unique_all_items)}
                     
-                # 提取子集并执行清洗
+                # 🧬 直接提取子集，不再进行行剔除 (dropna)
+                # 既然前置模块已处理完缺失值，这里直接镜像映射即可
                 df_subset = df_numeric[[c for c in unique_all_items if c in df_numeric.columns]].copy()
-                df_numeric_clean = df_subset.dropna(axis=0)
                 
-                if len(df_numeric_clean) < 10:
+                # 💡 防御性轻量检查：仅用于确认当前传入的 DataFrame 样本量是否本身就不足
+                current_sample_size = len(df_subset)
+                if current_sample_size < 10:
                     if current_step == 1:
-                        final_err_msg = f"数据清理后无有效样本（有效行数: {len(df_numeric_clean)}），请检查原始数据。"
+                        final_err_msg = f"量表【{sub_name}】初始传入样本量过低（当前仅有 {current_sample_size} 行数据），无法支撑 CFA 矩阵计算，请检查上游 EFA 输出的数据源。"
                     else:
                         trace_logs.append({
                             "round": current_step, "items_count": len(active_factor_items),
-                            "cfi": cfi_val, "tli": tli_val,
-                            "action": "⚠️ 因样本不足自动锁定上一轮最佳成果", "deleted_item": "无"
+                            "cfi": trace_logs[-1]['cfi'] if trace_logs else 0.0, 
+                            "tli": trace_logs[-1]['tli'] if trace_logs else 0.0,
+                            "action": "⚠️ 题量精简触发样本临界保护，自动锁定上一轮模型成果", 
+                            "deleted_item": "无"
                         })
                     break
                 
-                df_numeric_encoded = df_numeric_clean.rename(columns=name_mapping)
+                # 🚀 直接无缝重命名进入 CFA 编码流，完美避开由于某列引发的空集错位
+                df_numeric_encoded = df_subset.rename(columns=name_mapping)
+
+
+
+
+                
                 encoded_factor_items = [name_mapping[x] for x in active_factor_items]
                 encoded_method_items = [name_mapping[x] for x in active_method_items] if active_method_items else []
                     
-                result, err_msg, syntax_used = run_cfa_gui(
-                    df_numeric_encoded, factor_name, encoded_factor_items, method_name, encoded_method_items
-                )
+                # 运行底层 CFA 估算接口
+                try:
+                    result, err_msg, syntax_used = run_cfa_gui(
+                        df_numeric_encoded, factor_name, encoded_factor_items, method_name, encoded_method_items
+                    )
+                except Exception as e:
+                    result, err_msg, syntax_used = None, f"底层拟合器抛出未知异常: {str(e)}", ""
                     
                 if err_msg:
                     if final_result is not None:
                         trace_logs.append({
                             "round": current_step, "items_count": len(active_factor_items),
                             "cfi": cfi_val, "tli": tli_val,
-                            "action": f"⚠️ 拟合遇阻 ({err_msg})，自动锁定上一轮模型成果", "deleted_item": "无"
+                            "action": f"⚠️ 模型拟合遇阻 ({err_msg})，自动收拢并锁定上一轮无错成果", 
+                            "deleted_item": "无"
                         })
                         break
                     final_err_msg = err_msg
@@ -1543,13 +1503,12 @@ def render_stage2_cfa_clean():
                     
                 model_obj, estimates_raw, fit_stats = result
                 
-                # 🌟【超级兼容性修复点】：多策略精准解析 CFI 和 TLI，防止误判为 0.0
+                # 🌟【多策略精准解析 CFI 和 TLI】
                 cfi_val, tli_val = 0.0, 0.0
                 if isinstance(fit_stats, dict):
                     cfi_val = float(fit_stats.get("CFI", fit_stats.get("cfi", 0.0)))
                     tli_val = float(fit_stats.get("TLI", fit_stats.get("tli", 0.0)))
                 elif isinstance(fit_stats, pd.DataFrame):
-                    # 尝试匹配各种可能的列名组合
                     for col_name in fit_stats.columns:
                         if fit_stats[col_name].dtype == object:
                             cfi_rows = fit_stats[fit_stats[col_name].astype(str).str.upper() == 'CFI']
@@ -1557,34 +1516,28 @@ def render_stage2_cfa_clean():
                             if not cfi_rows.empty:
                                 val_cols = [c for c in fit_stats.columns if c != col_name]
                                 try: cfi_val = float(cfi_rows[val_cols[0]].values[0])
-                                except: pass
+                                catch: pass
                             if not tli_rows.empty:
                                 val_cols = [c for c in fit_stats.columns if c != col_name]
                                 try: tli_val = float(tli_rows[val_cols[0]].values[0])
-                                except: pass
-                elif hasattr(fit_stats, 'get'):
-                    try:
-                        cfi_val = float(fit_stats['CFI'])
-                        tli_val = float(fit_stats['TLI'])
-                    except: pass
+                                catch: pass
 
                 final_result = result
                 final_syntax_used = syntax_used
                 final_name_mapping = name_mapping
                 final_reverse_mapping = reverse_mapping
                     
-                # 如果第一轮（或后续轮次）就已经达标，写好日志，直接断开循环输出！
+                # 🎯 达标判定机制
                 if cfi_val >= 0.90 and tli_val >= 0.90:
                     trace_logs.append({
-                        "round": current_step,
-                        "items_count": len(active_factor_items),
-                        "cfi": cfi_val,
-                        "tli": tli_val,
-                        "action": "✨ 首轮即完美达标！无需做任何删题修正，圆满结束！" if current_step == 1 else "✨ 模型拟合指标成功达标，自动纯化圆满结束！",
+                        "round": current_step, "items_count": len(active_factor_items),
+                        "cfi": cfi_val, "tli": tli_val,
+                        "action": "✨ 首轮即完美达标！" if current_step == 1 else "✨ 模型拟合指标成功达标，自动纯化圆满结束！",
                         "deleted_item": "无"
                     })
                     break
                         
+                # 🗑️ 未达标：按载荷从小到大降序排列，找出主因子上表现最差的一道题予以剔除
                 df_est_check = estimates_raw.copy()
                 loadings_df = df_est_check[(df_est_check['op'] == '=~') & (df_est_check['LHS'] == factor_name)]
                 target_col = 'Std.all' if 'Std.all' in loadings_df.columns else 'Estimate'
@@ -1599,7 +1552,7 @@ def render_stage2_cfa_clean():
                     trace_logs.append({
                         "round": current_step, "items_count": len(active_factor_items),
                         "cfi": cfi_val, "tli": tli_val,
-                        "action": f"❌ 拟合未达标(CFI:{cfi_val:.3f}, TLI:{tli_val:.3f})，执行删题",
+                        "action": f"❌ 拟合未达标(CFI:{cfi_val:.3f}, TLI:{tli_val:.3f})，剔除主载荷最弱题",
                         "deleted_item": worst_raw_item
                     })
                     
@@ -1618,10 +1571,10 @@ def render_stage2_cfa_clean():
                 
             status_holder.empty()
                 
+            # 💾 结果的定点持久化隔离保存
             if final_err_msg:
                 st.session_state[f"n2_err_msg_{sub_name}"] = final_err_msg
                 st.session_state[f"n2_success_{sub_name}"] = False
-                st.error(f"❌【{sub_name}】运行报错：{final_err_msg}")
             elif final_result:
                 model_obj, estimates_raw, fit_stats = final_result
                 
@@ -1637,7 +1590,6 @@ def render_stage2_cfa_clean():
                 
                 df_cfa_used = df_numeric[[c for c in active_factor_items if c in df_numeric.columns]].dropna(axis=0)
                 
-                # 全隔离独立空间存储结果
                 st.session_state[f"n2_success_{sub_name}"] = True
                 st.session_state[f"n2_estimates_{sub_name}"] = estimates
                 st.session_state[f"n2_fit_stats_{sub_name}"] = fit_stats
@@ -1648,24 +1600,22 @@ def render_stage2_cfa_clean():
                 st.session_state[f"n2_df_cfa_{sub_name}"] = df_cfa_used
                 st.session_state[f"n2_factor_items_{sub_name}"] = list(active_factor_items)
                 st.session_state[f"n2_method_items_{sub_name}"] = list(active_method_items)
-    
-        global_status.success("🎉 所有量表的自动纯化删题计算已全部批量完成！请在下方 Tab 中查看不同 Measure 的报告。")
         
-    
+        global_status.success("🎉 所有量表的自动纯化删题计算已全部批量完成！请在下方 Tab 中查看不同 Measure 的报告。")
+
     # ==============================================================================
-    # 📊 2. 渲染呈现层：利用 Tabs 标签页，优雅展示不同 Measure 的分析报告
+    # 📊 4. 渲染呈现层 (保持原样)
     # ==============================================================================
     st.markdown("---")
     st.subheader("📊 各测量模型 (Measure) 分析报告")
     
     if active_measure_ids:
-        measure_tabs = st.tabs([f"{m_id}" for m_id in active_measure_ids])
+        measure_tabs = st.tabs([f"📊 {m_id}" for m_id in active_measure_ids])
         
         for idx, sub_name in enumerate(active_measure_ids):
             with measure_tabs[idx]:
                 if st.session_state.get(f"n2_success_{sub_name}", False):
-                    
-                    # 1. 自动纯化日志面板渲染 (Trace Log)
+                    # 1. 自动纯化日志面板渲染
                     trace_logs = st.session_state[f"n2_trace_logs_{sub_name}"]
                     st.markdown(f"##### 【{sub_name}】自动删题记录")
                     log_records = []
@@ -1714,7 +1664,7 @@ def render_stage2_cfa_clean():
                         val = metrics[k]
                         m_cols2[i].metric(label=k, value=f"{val:.3f}" if not np.isnan(val) else "N/A")
     
-                    # 3. 📄 详细子标签页：Estimates 与拟合报告
+                    # 3. 📄 详细子标签页
                     st.markdown("---")
                     t1, t2 = st.tabs(["📄 详细参数估计 (Estimates)", "🔍 完整拟合报告"])
                     
@@ -1783,11 +1733,6 @@ def render_stage2_cfa_clean():
                     st.info(f"💡 量表【{sub_name}】目前暂无有效模型成果。原因：{err_reason}")
     else:
         st.warning("⚠️ 暂无有效的量表可进行报告查看。")
-
-    
-    
-
-    
         
 
     
