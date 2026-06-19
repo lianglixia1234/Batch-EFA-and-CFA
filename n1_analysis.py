@@ -1458,7 +1458,7 @@ def render_stage2_cfa_clean():
     
         # --- 3. 模型拟合 ---
         st.markdown("---")
-        # ✂️ 已根据要求移除 prelimCFA 勾选框及分列布局，直接呈现单按钮，干净直观
+        # 已根据要求移除 prelimCFA 勾选框，直接呈现单按钮
         run_clicked = st.button("🚀 开始运行 CFA 分析", type="primary", key=f"run_main_cfa_btn_{sub_name}")
         
         if run_clicked:
@@ -1468,32 +1468,70 @@ def render_stage2_cfa_clean():
                 with st.spinner("正在拟合模型，请稍候..."):
                     factor_items_for_model = sort_item_cols_by_number(list(factor_items))
                     method_items_for_model = sort_item_cols_by_number(list(method_items)) if method_items else []
+                    
+                    # ==================================================================
+                    # 🧼 拦截层：在【不修改 run_cfa_gui】的前提下，就地对长文本题目做安全编码
+                    # ==================================================================
+                    # 1. 提取所有参与建模的独特题目
+                    unique_all_items = list(dict.fromkeys(factor_items_for_model + method_items_for_model))
+                    
+                    # 2. 建立【原始长文本】->【纯净安全英文变量名】的双向映射字典
+                    name_mapping = {item: f"v{idx + 1}" for idx, item in enumerate(unique_all_items)}
+                    reverse_mapping = {f"v{idx + 1}": item for idx, item in enumerate(unique_all_items)}
+                    
+                    # 3. 将输入的 df_numeric 列名安全替换
+                    df_numeric_encoded = df_numeric.copy()
+                    df_numeric_encoded = df_numeric_encoded.rename(columns=name_mapping)
+                    
+                    # 4. 将输入给函数的题目列表，安全转换为纯净的临时变量名
+                    encoded_factor_items = [name_mapping[x] for x in factor_items_for_model]
+                    encoded_method_items = [name_mapping[x] for x in method_items_for_model] if method_items_for_model else []
+                    
+                    # 5. 调用原版 run_cfa_gui (此时传进去的列名全变为了安全的 v1, v2...)
                     result, err_msg, syntax_used = run_cfa_gui(
-                        df_numeric, factor_name, factor_items_for_model, method_name, method_items_for_model
+                        df_numeric_encoded, 
+                        factor_name, 
+                        encoded_factor_items, 
+                        method_name, 
+                        encoded_method_items
                     )
                     
                     if err_msg:
                         st.error(err_msg)
                         st.code(syntax_used, language="text")
                     else:
-                        model_obj, estimates, fit_stats = result
+                        model_obj, estimates_raw, fit_stats = result
                         st.success("✅ 模型拟合成功！")
+                        
+                        # ==============================================================
+                        # 🔄 解码层：就地将 semopy 算出来的参数表还原为你的中文长文本题目
+                        # ==============================================================
+                        estimates = estimates_raw.copy()
+                        if 'LHS' in estimates.columns:
+                            estimates['LHS'] = estimates['LHS'].apply(lambda x: reverse_mapping.get(x, x))
+                        if 'RHS' in estimates.columns:
+                            estimates['RHS'] = estimates['RHS'].apply(lambda x: reverse_mapping.get(x, x))
+                        
+                        # 还原模型语法展示
+                        syntax_decoded = syntax_used
+                        for enc_name, raw_name in reverse_mapping.items():
+                            syntax_decoded = syntax_decoded.replace(enc_name, raw_name)
                         
                         # 🚀 多量表隔离状态注入机制：利用 sub_name 隔离各 Tab 的运行成果，防止串号
                         st.session_state[f"n2_estimates_{sub_name}"] = estimates
                         st.session_state[f"n2_fit_stats_{sub_name}"] = fit_stats
-                        st.session_state[f"n2_syntax_{sub_name}"] = syntax_used
+                        st.session_state[f"n2_syntax_{sub_name}"] = syntax_decoded
                         st.session_state[f"n2_factor_name_{sub_name}"] = factor_name
                         st.session_state[f"n2_method_name_{sub_name}"] = method_name
                         
                         # 同时保留对全局/下游基础下载、计分模块的原版兼容指针
                         st.session_state.n2_estimates = estimates
                         st.session_state.n2_fit_stats = fit_stats
-                        st.session_state.n2_syntax = syntax_used
+                        st.session_state.n2_syntax = syntax_decoded
                         st.session_state.n2_factor_name = factor_name
                         st.session_state.n2_method_name = method_name
                         
-                        # 保存用于可下载报告：CFA 使用的数据与题目列表
+                        # 保存用于可下载报告：CFA 使用的数据与题目列表 (保持原始长列名数据，确保下游计分不报错)
                         df_cfa_used = df_numeric[factor_items_for_model].dropna(axis=0)
                         st.session_state.n2_df_cfa = df_cfa_used
                         st.session_state.n2_factor_items = list(factor_items_for_model)
