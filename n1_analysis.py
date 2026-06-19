@@ -1283,7 +1283,7 @@ def render_stage2_cfa_clean():
     # 📥 阈值与兜底限制设置（全局变量，确保下文循环能正确读取）
     min_items_limit = st.number_input(
         "🛑 最小保留题目底线",
-        min_value=3, max_value=30, value=5, step=1,
+        min_value=3, max_value=30, value=8, step=1,
         help="当维度内题目数减少到该值时，算法必须触发强制安全保护停止删题，防止被删空。"
     )
 
@@ -1298,7 +1298,7 @@ def render_stage2_cfa_clean():
     cfa_ready_queue = {}  # 准备队列缓存
     
     if active_measure_ids:
-        tabs = st.tabs([f"⚙️ {m_id}" for m_id in active_measure_ids])
+        tabs = st.tabs([f" {m_id}" for m_id in active_measure_ids])
         
         for index, sub_name in enumerate(active_measure_ids):
             with tabs[index]:
@@ -1309,7 +1309,7 @@ def render_stage2_cfa_clean():
                 except NameError:
                     all_items = sorted(list(asset_body.get("items", [])))
                 
-                st.markdown(f"#### 📐 量表 【{sub_name}】 模型架构")
+                st.markdown(f"####  【{sub_name}】")
                 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -1384,7 +1384,7 @@ def render_stage2_cfa_clean():
 
         # 💡 新增机制：强制锁定与校验控制台
         st.markdown("---")
-        st.info("📌 **核对完毕后，请点击下方确认锁定按钮**。系统将把您在上方各 Tab 中挑选的最新模型结构固化存入后台，以供引擎批量处理。")
+        st.info("📌 **核对完毕后，请点击下方确认锁定按钮**。")
         lock_confirmed = st.button("🔒 确认并锁定所有量表模型结构配置", type="secondary", use_container_width=True)
         if lock_confirmed:
             st.session_state["cfa_locked_config"] = cfa_ready_queue
@@ -1393,7 +1393,7 @@ def render_stage2_cfa_clean():
     # ==============================================================================
     # 🚀 3. 模型拟合运算层 (多量表自动纯化删题引擎)
     # ==============================================================================
-    st.markdown("### 🚀 第三步：开启自动化 CFA 删题引擎")
+    st.markdown("### 🚀 第三步：开启自动化 CFA 删题")
     run_all_clicked = st.button("🔥 开始运行所有量表自动删题 CFA 分析", type="primary", key="run_all_cfa_global_btn")
     
     if run_all_clicked:
@@ -1613,10 +1613,10 @@ def render_stage2_cfa_clean():
     # 📊 4. 渲染呈现层 (保持原样)
     # ==============================================================================
     st.markdown("---")
-    st.subheader("📊 各测量模型 (Measure) 分析报告")
+    st.subheader("各测量模型 (Measure) 分析报告")
     
     if active_measure_ids:
-        measure_tabs = st.tabs([f"📊 {m_id}" for m_id in active_measure_ids])
+        measure_tabs = st.tabs([f" {m_id}" for m_id in active_measure_ids])
         
         for idx, sub_name in enumerate(active_measure_ids):
             with measure_tabs[idx]:
