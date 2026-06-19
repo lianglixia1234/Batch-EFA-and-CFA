@@ -1307,7 +1307,7 @@ def render_stage2_cfa_clean():
     )
 
     # ==========================================================================
-    # 🛠️ 3. 看板核对
+    # 🛠️ 3. 测量模型结构核对看板
     # ==========================================================================
     st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对看板")
 
@@ -1318,7 +1318,6 @@ def render_stage2_cfa_clean():
             continue
         sorted_items = sort_item_cols_by_number(list(factor_items))
 
-        # 智能预检测反向题
         auto_detected_reverse_items = [
             item for item in sorted_items 
             if str(item).rstrip().endswith("r") or str(item).rstrip().endswith("_r") or "反向" in str(item)
