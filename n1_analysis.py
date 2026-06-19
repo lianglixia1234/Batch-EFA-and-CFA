@@ -1289,15 +1289,12 @@ def render_stage2_cfa_clean():
     col_param1 = st.columns(1)[0]
     with col_param1:
         min_items_limit = st.number_input(
-            "🛑 单维度最小保留题目底线",
-            min_value=3, max_value=30, value=5, step=1,
+            "🛑 最小保留题目底线",
+            min_value=3, max_value=30, value=8, step=1,
             help="当维度内题目数减少到该值时，算法必须触发强制安全保护停止删题，防止被删空。"
         )
 
-    # ==========================================================================
-    # 🛠️ 3. 测量模型结构核对看板
-    # ==========================================================================
-    st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对看板")
+    
 
     # 清洗列名
     def clean_col_name(name):
@@ -1306,120 +1303,166 @@ def render_stage2_cfa_clean():
     df_analysis.columns = [clean_col_name(c) for c in df_analysis.columns]
 
     
-    # ==========================================================
-    # 🔴 核心修改：智能保留数值列 (Smart Numeric Filter)
-    # ==========================================================
-    st.write("📊 **数据预处理报告**")
-
-    # 1. 强制转换为数值 (非数字变为 NaN)
-    df_numeric = df_analysis.apply(pd.to_numeric, errors='coerce')
     
-    # 2. 剔除“非数值列”
-    # 如果某一列转换后全是 NaN (例如"姓名"列)，说明它不是量表题，直接删除该列
-    # 这样可以防止后面 dropna 时把整行数据都误删了
-    cols_before = df_numeric.columns
-    df_numeric = df_numeric.dropna(axis=1, how='all')
-    cols_after = df_numeric.columns
+
+
+
+    # 🛠️ 第二步：CFA 测量模型结构核对看板 (Tabs 标签切换版)
+    # ==========================================================================
+    st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对")
     
-    # 提示用户删除了哪些列
-    dropped_cols = set(cols_before) - set(cols_after)
-    if dropped_cols:
-        st.info(f"ℹ️ 已自动过滤掉 {len(dropped_cols)} 个非数值列 (仅用于分析的量表题被保留): {', '.join(list(dropped_cols)[:5])}...")
-
-    # 3. 剔除“含有缺失值或无穷大值的行”
-    # 现在剩下的列都是纯数字了，可以安全地删除漏填的样本
-    original_len = len(df_numeric)
-
-    # 移除包含NaN的行
-    df_numeric = df_numeric.dropna(axis=0, how='any')
-
-    # 移除包含无穷大值(Inf)的行
-    df_numeric = df_numeric.replace([np.inf, -np.inf], np.nan).dropna()
-    df_numeric = df_numeric[~df_numeric.isin([np.inf, -np.inf]).any(axis=1)]
-
-    cleaned_len = len(df_numeric)
-
-    removed_rows = original_len - cleaned_len
-    if removed_rows > 0:
-        st.warning(f"⚠️ 已移除 {removed_rows} 行含有缺失值或无穷大值的样本。CFA 最终分析样本量: {cleaned_len}")
-    else:
-        st.success(f"✅ 数据完整，有效样本量: {cleaned_len}")
+    # 🧬 1. 读取并解析批量量表底层资产 (联动上游结构)
+    all_upstream_measures = {}
+    n1_asset = st.session_state.get("N1_preEFA")
     
-    if cleaned_len < 10:
-        st.error("❌ 有效样本量太少 (<10)，无法进行 CFA 分析。请检查数据是否包含大量缺失值。")
-        return
+    if isinstance(n1_asset, dict) and n1_asset:
+        for ds_key, measure_dict in n1_asset.items():
+            if isinstance(measure_dict, dict):
+                for m_id, m_config in measure_dict.items():
+                    if isinstance(m_config, dict) and "kept_items" in m_config:
+                        raw_df_entity = m_config.get("clean_df")
+                        if raw_df_entity is None:
+                            if "sub_datasets" in st.session_state and ds_key in st.session_state.sub_datasets:
+                                raw_df_entity = st.session_state.sub_datasets[ds_key]
+                            else:
+                                raw_df_entity = st.session_state.get("df_source")
+                        
+                        all_upstream_measures[str(m_id)] = {
+                            "items": m_config["kept_items"],
+                            "clean_df": raw_df_entity,
+                            "ds_key": ds_key
+                        }
+    elif 'efa_suggested_structure' in st.session_state:
+        structure = st.session_state.efa_suggested_structure
+        if isinstance(structure, dict):
+            for factor_key, items_list in structure.items():
+                all_upstream_measures[str(factor_key)] = {
+                    "items": items_list,
+                    "clean_df": st.session_state.get("df_source"),
+                    "ds_key": "default"
+                }
 
-    # 更新供用户选择的题目列表 (现在只包含数值列了)
-    all_items = df_numeric.columns.tolist()
-    # ==========================================================
-    # --- 2. 模型构建 ---
-    st.subheader("1. 构建模型 (Model Configuration)")
+    if not all_upstream_measures:
+        st.info("💡 暂未检测到上游 EFA 留存的题目资产结构。已自动使用当前数据集的全部列作为默认量表池。")
+        current_df = st.session_state.get("df_source")
+        all_items_pool = list(current_df.columns) if current_df is not None else []
+        all_upstream_measures["Default_Measure"] = {"items": all_items_pool, "clean_df": current_df, "ds_key": "default"}
     
-    # 🆕 导入 EFA 结构按钮
-    if 'efa_suggested_structure' in st.session_state:
-        st.markdown("##### 🔗 EFA 连接")
-        if st.button("📥 导入 N1 模块生成的 EFA 结构"):
-            structure = st.session_state.efa_suggested_structure
-            # 假设 EFA 只有一个主因子 F1 (或者取第一个因子作为 Trait)
-            # 如果有多个因子，这里默认取第一个作为演示，或者让用户选
-            # 这里简单化：取所有因子的题目合集作为 Trait Items (通常单因子CFA)
-            # 或者取 F1 的题目。
-            
-            # 策略：默认把 EFA 的第一个因子的题目填入 A
-            first_factor = list(structure.keys())[0]
-            items_for_f1 = structure[first_factor]
-            
-            st.session_state.auto_fill_items = items_for_f1
-            st.success(f"已导入 EFA {first_factor} 的 {len(items_for_f1)} 个题目到主因子。")
-
-    col1, col2 = st.columns(2)
+    # 📂 允许用户筛选参与核对的量表
+    active_measure_ids = list(all_upstream_measures.keys())
     
-    # 获取默认选项
-    default_items = st.session_state.get('auto_fill_items', [])
-    # 确保默认选项都在当前 all_items 里 (防止文件名不同导致的 mismatch)
-    default_items = [i for i in default_items if i in all_items]
-
-    with col1:
-        st.markdown("#### 🅰️ 主因子 (Trait Factor)")
-        factor_name = st.text_input("给主因子起个名 (英文):", value="Factor1")
+    # 🌟 核心改动：使用 st.tabs 动态创建量表切换标签页
+    if active_measure_ids:
+        tabs = st.tabs([f"📦 量表: {m_id}" for m_id in active_measure_ids])
         
-        # 主因子选择
-        factor_items = smart_multiselect(
-            options=all_items,
-            label=f"选择属于 {factor_name} 的题目",
-            key_suffix="cfa_factor1",
-            default_selected=default_items,
-            show_selection_controls=True,
-        )
-
-    with col2:
-        st.markdown("#### 🅱️ 方法因子 (Method Factor)")
-        method_name = st.text_input("给方法因子起个名 (英文):", value="Method")
+        # 建立全局就绪队列缓存，供后续批量运行按钮直接提取
+        cfa_ready_queue = {}
         
-        # 限制范围: 只能从 factor_items (主因子已选题目) 中选择
-        method_options = factor_items if factor_items else []
-        method_key_suffix = "cfa_method"
-        method_sig_key = f"{method_key_suffix}_options_sig"
-        method_options_sig = tuple(method_options)
-        if st.session_state.get(method_sig_key) != method_options_sig:
-            _reset_smart_multiselect_cache(method_key_suffix)
-            st.session_state[method_sig_key] = method_options_sig
-        # 根据统一规则（末尾 r）自动预选方法因子，供用户确认
-        default_method_items = [x for x in method_options if _is_reverse_coded(x)] if method_options else []
-        st.caption("已根据统一规则（题目文本末尾为 r）预选方法因子题目，请确认或修改。")
-        def _on_reset_method_n2():
-            _reset_smart_multiselect_cache(method_key_suffix)
-            st.session_state[method_sig_key] = method_options_sig
-            st.session_state[f"{method_key_suffix}_last_selected"] = default_method_items
-        st.button('按”末尾 r”规则重新预选方法因子题目', key="n2_btn_reset_method_defaults",
-                  on_click=_on_reset_method_n2)
-        method_items = smart_multiselect(
-            options=method_options,
-            label=f"选择受到 {method_name} 影响的题目",
-            key_suffix=method_key_suffix,
-            default_selected=default_method_items,
-            show_selection_controls=True,
-        )
+        # 🔄 2. 遍历标签页，每个 Tab 内独立配置一个量表的结构
+        for index, sub_name in enumerate(active_measure_ids):
+            with tabs[index]:
+                asset_body = all_upstream_measures[sub_name]
+                all_items = sort_item_cols_by_number(list(asset_body.get("items", [])))
+                
+                st.markdown(f"#### ⚙️ 配置 【{sub_name}】 的因子结构")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("##### 🅰️ 主因子 (Trait Factor)")
+                    factor_name = st.text_input(
+                        "给主因子起个名 (英文):", 
+                        value=f"{sub_name}", 
+                        key=f"cfa_fname_inp_{sub_name}"
+                    )
+                    
+                    factor_items = smart_multiselect(
+                        options=all_items,
+                        label=f"选择属于 {factor_name} 的题目",
+                        key_suffix=f"cfa_factor_{sub_name}",
+                        default_selected=all_items, # 默认预选 EFA 留下来的全部题目
+                        show_selection_controls=True,
+                    )
+
+                with col2:
+                    st.markdown("##### 🅱️ 方法因子 (Method Factor)")
+                    method_name = st.text_input(
+                        "给方法因子起个名 (英文):", 
+                        value=f"Method", 
+                        key=f"cfa_mname_inp_{sub_name}"
+                    )
+                    
+                    method_options = factor_items if factor_items else []
+                    method_key_suffix = f"cfa_method_{sub_name}"
+                    method_sig_key = f"{method_key_suffix}_options_sig"
+                    method_options_sig = tuple(method_options)
+                    
+                    # 智能缓存判定与清理
+                    if st.session_state.get(method_sig_key) != method_options_sig:
+                        if '_reset_smart_multiselect_cache' in globals() or '_reset_smart_multiselect_cache' in locals():
+                            _reset_smart_multiselect_cache(method_key_suffix)
+                        st.session_state[method_sig_key] = method_options_sig
+                    
+                    # 规则自动预选
+                    default_method_items = [x for x in method_options if _is_reverse_coded(x)] if method_options else []
+                    st.caption("已根据统一规则（题目末尾为 r）自动预选方法因子题目。")
+                    
+                    # 闭包重置回调函数
+                    def _on_reset_method_tab(k_suffix=method_key_suffix, sig_val=method_options_sig, def_items=default_method_items):
+                        if '_reset_smart_multiselect_cache' in globals() or '_reset_smart_multiselect_cache' in locals():
+                            _reset_smart_multiselect_cache(k_suffix)
+                        st.session_state[f"{k_suffix}_options_sig"] = sig_val
+                        st.session_state[f"{k_suffix}_last_selected"] = def_items
+
+                    st.button(
+                        '🔄 重新预选方法因子题目', 
+                        key=f"tab_btn_reset_method_{sub_name}",
+                        on_click=_on_reset_method_tab
+                    )
+                    
+                    method_items = smart_multiselect(
+                        options=method_options,
+                        label=f"选择受到 {method_name} 影响的题目",
+                        key_suffix=method_key_suffix,
+                        default_selected=default_method_items,
+                        show_selection_controls=True,
+                    )
+                
+                # 🛠️ 每个独立 Tab 底部的“局部试运行/核对”按钮
+                tab_run_col1, tab_run_col2 = st.columns([1, 2])
+                with tab_run_col1:
+                    if st.button(f"🔍 试运行单量表 CFA: {sub_name}", key=f"run_single_cfa_btn_{sub_name}"):
+                        if not factor_items:
+                            st.error("❌ 主因子题目不能为空")
+                        else:
+                            st.info(f"正在对【{sub_name}】进行结构有效性试运行测试...")
+                            # 这里可以调用您原版的 run_cfa_gui 逻辑，并将单次试运行结果呈现在本 Tab 底部。
+                
+                # 安全压入全局准备队列缓存
+                if factor_items:
+                    cfa_ready_queue[sub_name] = {
+                        "asset_body": asset_body,
+                        "df_numeric": asset_body.get("clean_df"),
+                        "factor_name": factor_name,
+                        "method_name": method_name if method_items else None,
+                        "factor_items": list(factor_items),
+                        "method_items": list(method_items) if method_items else []
+                    }
+        
+        # 🚀 3. 统一运行与批量调整控制台 (呈现在 Tabs 下方)
+        st.markdown("---")
+        st.markdown("### 🎛️ 批量分析运行控制台")
+        st.info(f"📋 当前标签页中已就绪的量表队列: `{', '.join(list(cfa_ready_queue.keys()))}`")
+        
+        ctrl_col1, ctrl_col2 = st.columns([1, 1])
+        with ctrl_col1:
+            if st.button("🚀 开始批量多量表 CFA 分析 ", type="primary", key="batch_run_cfa_all_tabs"):
+                if not cfa_ready_queue:
+                    st.error("❌ 队列中没有配置有效的量表题目，请检查各 Tab 标签页内的选择。")
+                else:
+                    st.session_state["cfa_batch_queue_payload"] = cfa_ready_queue
+
+                    # 下方即可直接触发批量纯化引擎的遍历循环
+        
     # --- 3. 模型拟合 ---
     st.markdown("---")
     cfa_btn_col, cfa_prelim_col = st.columns([1, 1])
