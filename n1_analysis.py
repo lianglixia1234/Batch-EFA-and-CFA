@@ -1449,6 +1449,8 @@ def render_stage2_cfa_clean():
             if "method_items" not in locals(): method_items = []
     
     
+
+    # --- 3. 模型拟合 (多量表独立 Tab 呈现 - 自动纯化删题版) ---
     # --- 3. 模型拟合 (多量表独立 Tab 呈现 - 自动纯化删题版) ---
     st.markdown("---")
     run_all_clicked = st.button("🚀 开始运行 所有量表自动删题CFA 分析", type="primary", key="run_all_cfa_global_btn")
@@ -1456,6 +1458,11 @@ def render_stage2_cfa_clean():
     if run_all_clicked:
         global_status = st.empty()
         status_holder = st.empty()
+        
+        # 🌟 【隔离修复 1】起点清洗：一旦开始批量运行，立刻定点清洗该板块历史残留指标，杜绝幽灵记忆
+        for k in list(st.session_state.keys()):
+            if k.startswith("n2_") and not k.endswith("_btn"):
+                del st.session_state[k]
         
         # 🔄 修改 3：遍历所有选中的量表进行批量离线计算 (由 all_measures 更换为 active_measure_ids)
         for sub_name in active_measure_ids:
@@ -1597,7 +1604,10 @@ def render_stage2_cfa_clean():
                 for enc_name, raw_name in final_reverse_mapping.items():
                     syntax_decoded = syntax_decoded.replace(enc_name, raw_name)
                 
-                # 🚀 核心修复：在这里注入成功状态，否则下方页面渲染不出
+                # 创建当前量表专属过滤后的干净数据集（安全隔离点）
+                df_cfa_used = df_numeric[[c for c in active_factor_items if c in df_numeric.columns]].dropna(axis=0)
+                
+                # 🌟 【隔离修复 2】全物理隔离存储：全部存入带名为 _{sub_name} 后缀的独立空间中
                 st.session_state[f"n2_success_{sub_name}"] = True
                 st.session_state[f"n2_estimates_{sub_name}"] = estimates
                 st.session_state[f"n2_fit_stats_{sub_name}"] = fit_stats
@@ -1605,21 +1615,22 @@ def render_stage2_cfa_clean():
                 st.session_state[f"n2_factor_name_{sub_name}"] = factor_name
                 st.session_state[f"n2_method_name_{sub_name}"] = method_name
                 st.session_state[f"n2_trace_logs_{sub_name}"] = trace_logs  
+                st.session_state[f"n2_df_cfa_{sub_name}"] = df_cfa_used
+                st.session_state[f"n2_factor_items_{sub_name}"] = list(active_factor_items)
+                st.session_state[f"n2_method_items_{sub_name}"] = list(active_method_items)
                 
-                # 兼容指针
+                # 兼容指针（仅用作向前兼容，防止渲染层的硬编码报错，但下游报告已全面对接隔离空间）
                 st.session_state.n2_estimates = estimates
                 st.session_state.n2_fit_stats = fit_stats
                 st.session_state.n2_syntax = syntax_decoded
                 st.session_state.n2_factor_name = factor_name
                 st.session_state.n2_method_name = method_name
-                
-                df_cfa_used = df_numeric[active_factor_items].dropna(axis=0)
                 st.session_state.n2_df_cfa = df_cfa_used
                 st.session_state.n2_factor_items = list(active_factor_items)
                 st.session_state.n2_method_items = list(active_method_items)
     
         global_status.success("🎉 所有量表的自动纯化删题计算已全部批量完成！请在下方 Tab 中查看不同 Measure 的报告。")
-    
+        
     
     # ==============================================================================
     # 📊 2. 渲染呈现层：利用 Tabs 标签页，优雅展示不同 Measure 的分析报告
@@ -1633,6 +1644,7 @@ def render_stage2_cfa_clean():
         # 🔄 修改 4：将这里原本的 all_measures 更换为 active_measure_ids，保持遍历集合在前后完全统一
         for idx, sub_name in enumerate(active_measure_ids):
             with measure_tabs[idx]:
+                # 🌟 【隔离修复 3】对接独立会话字典进行结果判定，确保无跨量表交叉污染
                 if st.session_state.get(f"n2_success_{sub_name}", False):
                     
                     # 1. 自动纯化日志面板渲染 (Trace Log)
@@ -1687,6 +1699,7 @@ def render_stage2_cfa_clean():
                     
                     with t1:
                         st.caption("Latent Variables (Factor Loadings) & Covariances")
+                        # 🌟 【隔离修复 4】展示层拉取该量表专属的参数估计结果，100%保留你原有的样式与 lambda 排序排序规则
                         est_df = st.session_state[f"n2_estimates_{sub_name}"].copy()
                         fname = st.session_state[f"n2_factor_name_{sub_name}"]
                         mname = st.session_state[f"n2_method_name_{sub_name}"]
@@ -1711,7 +1724,14 @@ def render_stage2_cfa_clean():
                         st.dataframe(est_df[final_cols].style.format(format_dict))
                         
                         csv = est_df[final_cols].to_csv().encode('utf-8-sig')
-                        st.download_button("📥 下载参数估计表", csv, f"cfa_estimates_{sub_name}.csv", "text/csv", key=f"dl_est_btn_{sub_name}")
+                        # 🌟 【修复 5】下载按钮更换成完全与索引动态结合的 key，防范改名或加减 Measure 时产生的 DOM 漂移
+                        st.download_button(
+                            label="📥 下载参数估计表", 
+                            data=csv, 
+                            file_name=f"cfa_estimates_{sub_name}.csv", 
+                            mime="text/csv", 
+                            key=f"dl_est_btn_unique_{sub_name}_{idx}"
+                        )
                         
                     with t2:
                         st.write("### Model Test User Model:")
@@ -1742,10 +1762,6 @@ def render_stage2_cfa_clean():
                 else:
                     err_reason = st.session_state.get(f"n2_err_msg_{sub_name}", "尚未点击全局大按钮运行分析")
                     st.info(f"💡 量表【{sub_name}】目前暂无有效模型成果。原因：{err_reason}")
-
-
-                
-    
     else:
         st.warning("⚠️ 暂无有效的量表可进行报告查看。")
 
