@@ -31,7 +31,7 @@ except ImportError:
 
 
 # ==============================================================================
-# 核心算法区域
+# EFA 核心算法区域
 # ==============================================================================
 
 def sort_items_by_number(items):
@@ -1050,6 +1050,185 @@ def render_stage1_efa_clean():
                             f" * 🟢 内部原生标志: **`{sub_m}`** ── 保留题目: `{len(config['kept_items'])}` 题 | "
                             f"推荐 CFA 验证潜变量数: `{config['n_factors']}` | *更新时间: {config['timestamp']}*"
                         )
+
+# CFA 核心算法区域
+# ==============================================================================
+
+def _is_reverse_coded(item_name):
+    """判断题目是否为反向题：仅当题目文本去尾部空白/标点后以 r 结尾。"""
+    if not isinstance(item_name, str):
+        return False
+    _, _, text = parse_item_col(item_name)
+    s = (text or item_name).strip()
+    s = s.replace("ｒ", "r").replace("Ｒ", "R")
+    s = re.sub(r"""[\s\u3000\)\]）】》〉'"“”’`~!@#$%^&*+=|\\/:;,.?，。！？、；：-]+$""", "", s)
+    return s.lower().endswith("r")
+
+
+def _extract_item_num_and_text(col_name: str) -> Tuple[Any, str]:
+    pre, num, text = parse_item_col(str(col_name))
+    item_num = num
+    if item_num is None:
+        m = re.search(r"(\d+)", str(col_name).split("_", 1)[0])
+        item_num = int(m.group(1)) if m else np.nan
+    return item_num, (text or str(col_name))
+
+
+def _reset_smart_multiselect_cache(key_suffix: str) -> None:
+    """清理 smart_multiselect 的 checkbox/选择缓存，强制按最新默认值重建。"""
+    cb_prefix = f"cb_{key_suffix}_"
+    for k in list(st.session_state.keys()):
+        if k.startswith(cb_prefix):
+            del st.session_state[k]
+    for k in (f"{key_suffix}_last_selected", f"{key_suffix}_control_action"):
+        st.session_state.pop(k, None)
+
+def calculate_advanced_stats(model, fit_stats, n_samples, df):
+    """
+    补充计算高级指标 (SABIC) 和 semopy 缺失的指标 (SRMR)
+    """
+    stats_dict = fit_stats.iloc[0].to_dict()
+    
+    # 1. SABIC (Sample-size Adjusted BIC)
+    try:
+        aic = stats_dict.get('AIC', 0)
+        logl = stats_dict.get('LogL', stats_dict.get('logl', 0))
+        k = (aic + 2 * logl) / 2
+        sabic = -2 * logl + k * np.log((n_samples + 2) / 24)
+        stats_dict['SABIC'] = sabic
+    except:
+        stats_dict['SABIC'] = np.nan
+
+    # 2. SRMR (Standardized Root Mean Square Residual) - 手动计算
+    # semopy 无 predict_cov，用 calc_sigma() 得到模型隐含协方差；若已有则直接使用
+    if 'SRMR' not in stats_dict or (isinstance(stats_dict.get('SRMR'), float) and np.isnan(stats_dict.get('SRMR'))):
+        if 'srmr' in stats_dict and isinstance(stats_dict['srmr'], (int, float)):
+            stats_dict['SRMR'] = stats_dict['srmr']
+        else:
+            try:
+                obs_order = model.vars['observed']
+                df_obs = df[obs_order]
+                obs_corr = df_obs.corr().values
+                sigma_tuple = model.calc_sigma()
+                implied_cov = np.asarray(sigma_tuple[0], dtype=float)
+                if implied_cov.shape != obs_corr.shape:
+                    raise ValueError("calc_sigma 与观测变量维度不一致")
+                d = np.diag(np.sqrt(np.maximum(np.diag(implied_cov), 1e-12)))
+                d_inv = np.linalg.inv(d)
+                implied_corr = d_inv @ implied_cov @ d_inv
+                residuals = obs_corr - implied_corr
+                idx = np.tril_indices_from(residuals)
+                res_values = residuals[idx]
+                stats_dict['SRMR'] = float(np.sqrt(np.mean(res_values**2)))
+            except Exception:
+                stats_dict['SRMR'] = np.nan
+
+    # 2. RMSEA Confidence Interval & P-value
+    # semopy 默认不输出 RMSEA 的 CI 和 P-value，这里尝试手动近似计算
+    # 或者直接使用 semopy 的默认输出（如果版本支持）
+    # 为了简化，我们暂时只依赖 semopy 提供的基础指标，如果需要精确的 P-close，需要手动实现非中心卡方分布计算
+    # 这里我们先保留 semopy 原生值，后续版本可扩展 scipy.stats.ncx2 计算逻辑
+    
+    return stats_dict
+
+def run_cfa_gui(df, factor_name, factor_items, method_name, method_items):
+    """
+    根据用户GUI选择运行 CFA
+    """
+    # 数据质量检查
+    df_clean = df.copy()
+
+    # 移除包含NaN或无穷大值的行
+    df_clean = df_clean.replace([np.inf, -np.inf], np.nan).dropna()
+    df_clean = df_clean[~df_clean.isin([np.inf, -np.inf]).any(axis=1)]
+
+    if df_clean.empty:
+        return None, "数据清理后没有有效样本，无法进行CFA分析", None
+
+    if len(df_clean) < len(df):
+        st.warning(f"⚠️ 已自动移除 {len(df) - len(df_clean)} 行含有无效值的样本")
+
+    # 1. 自动构建模型语法
+    # 严格采用 marker-variable 标定：
+    # - 主因子第一题载荷固定为 1（1*item1）
+    # - 主因子方差自由估计（不对 factor_name ~~ factor_name 施加固定值）
+    ordered_factor_items = sort_item_cols_by_number(list(factor_items))
+    if not ordered_factor_items:
+        return None, "主因子题目为空，无法构建 CFA 模型。", None
+    marker_item = ordered_factor_items[0]
+    other_items = ordered_factor_items[1:]
+    if other_items:
+        model_desc = f"{factor_name} =~ 1*{marker_item} + {' + '.join(other_items)}\n"
+    else:
+        model_desc = f"{factor_name} =~ 1*{marker_item}\n"
+    
+    if method_items:
+        ordered_method_items = sort_item_cols_by_number(list(method_items))
+        model_desc += f"{method_name} =~ {' + '.join(ordered_method_items)}\n"
+        # 方法因子方差固定为 1
+        model_desc += f"{method_name} ~~ 1*{method_name}\n"
+    
+    # 2. 初始化与拟合
+    import semopy
+    from semopy import Model
+    try:
+        model = Model(model_desc)
+        model.fit(df_clean)
+    except Exception as e:
+        return None, f"模型拟合失败: {str(e)}", None
+
+    # 3. 获取统计结果
+    try:
+        # 获取参数估计 (包含非标准化和标准化)
+        estimates = model.inspect(std_est=True)
+        
+        # semopy 的 inspect 默认没有 Std.lv 列，我们需要手动调整
+        # 在 R lavaan 中:
+        # Estimate = 非标准化
+        # Std.lv = 潜变量标准化 (Latent variable variance = 1)
+        # Std.all = 完全标准化 (Latent + Observed variance = 1)
+        
+        # semopy 不同版本中标准化载荷列名可能不同：'Est. Std'、'est.std'、'Std.Est'、'std.all' 等
+        # 自动检测并重命名标准化载荷列
+        possible_std_cols = ['Est. Std', 'est.std', 'Std.Est', 'std.all', 'Std.Estimate', 'est_std', 'standardized']
+        std_col_found = None
+        for col in possible_std_cols:
+            if col in estimates.columns:
+                std_col_found = col
+                break
+        
+        rename_map = {
+            'lval': 'LHS', 'op': 'op', 'rval': 'RHS',
+            'Estimate': 'Estimate', 'Std. Err': 'Std.Err', 
+            'z-value': 'z-value', 'p-value': 'P(>|z|)'
+        }
+        if std_col_found:
+            rename_map[std_col_found] = 'Std.all'
+        
+        estimates = estimates.rename(columns=rename_map)
+        
+        # 获取拟合指数
+        fit_stats = semopy.calc_stats(model)
+        
+        # 补充计算高级指标
+        n = len(df_clean)
+        if not fit_stats.empty:
+            advanced_stats = calculate_advanced_stats(model, fit_stats, n, df_clean)
+        else:
+            advanced_stats = {}
+            
+    except Exception as e:
+        return None, f"计算统计量失败: {str(e)}", None
+        
+    return (model, estimates, advanced_stats), None, model_desc
+
+
+
+
+
+
+
+
 
 
 
