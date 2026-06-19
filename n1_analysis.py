@@ -1345,7 +1345,7 @@ def render_stage2_cfa_clean():
     
     # 🌟 核心改动：使用 st.tabs 动态创建量表切换标签页
     if active_measure_ids:
-        tabs = st.tabs([f"📦 量表: {m_id}" for m_id in active_measure_ids])
+        tabs = st.tabs([f"{m_id}" for m_id in active_measure_ids])
         
         # 建立全局就绪队列缓存，供后续批量运行按钮直接提取
         cfa_ready_queue = {}
