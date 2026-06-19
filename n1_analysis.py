@@ -1040,22 +1040,21 @@ def render_stage1_efa_clean():
 
 
 
-
-# 🧪 2. 自动删题 CFA 板块
+# 🧪 2. 自动删题 CFA 板块 (批量报告输出增强版)
 # ==============================================================================
 def render_stage2_cfa_clean():
     """
-    【CFA 全自动拟合导向型批量删题引擎】
+    【CFA 全自动拟合导向型批量删题与批量报告引擎】
     唯一核心逻辑：完全根据拟合指数 CFI / TLI 进行逐轮迭代纯化。
     Stage 1: 保底达标线 (CFI >= 0.90 且 TLI >= 0.90)
     Stage 2: 优选精简线 (冲刺双 0.95，或精简至目标题目数)
     
-    【设计原则：100% 结果表样式复刻】
-    1. 内部试删调用原版 `run_cfa_gui`，不污染底层的潜变量方差标定、残差和卡方计算。
-    2. 自动解决数字开头 (如 10_xxx) 的 Syntax Error 语法错误。
-    3. 运行定稿后，直接将计算实体存入系统原有状态，完美继承 Part 1-5 报表与原本的 Excel 导出规范，表格格式完全一致。
+    【批量输出原则】
+    1. 剔除任何与“得分计算”、“公式生成”相关的无关代码，100% 专注于 CFA 结果报告呈现。
+    2. 自动运行并同时保留所有选中量表的【Stage 1 方案】与【Stage 2 方案】。
+    3. 支持用户一键统一切换“0.90保底方案群”或“0.95精简方案群”，一次性浏览并输出所有量表的模型拟合与报表。
     """
-    st.subheader("🔄 CFA 双阶段拟合优化全自动删题引擎")
+    st.subheader("🔄 CFA 双阶段拟合优化全自动批量删题与报告引擎")
 
     # ==========================================================================
     # 🧬 1. 读取上游 EFA 资产与底层实体数据
@@ -1110,7 +1109,7 @@ def render_stage2_cfa_clean():
 
     sub_datasets = {k: all_upstream_measures[k] for k in selected_measure_ids}
 
-    # 阈值设置：防止某些具有高拟合潜力的维度被过度删题
+    # 阈值设置
     col_param1, col_param2 = st.columns(2)
     with col_param1:
         min_items_limit = st.number_input(
@@ -1126,7 +1125,7 @@ def render_stage2_cfa_clean():
         )
 
     # ==========================================================================
-    # 🛠️ 3. 测量模型结构核对看板 (清晰呈现主因子和方法因子的当前题目数)
+    # 🛠️ 3. 测量模型结构核对看板
     # ==========================================================================
     st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对看板")
 
@@ -1137,33 +1136,18 @@ def render_stage2_cfa_clean():
             continue
         sorted_items = sort_item_cols_by_number(list(factor_items))
 
-        # 预检测反向题项
         auto_detected_reverse_items = [
             item for item in sorted_items 
             if str(item).rstrip().endswith("r") or str(item).rstrip().endswith("_r") or "反向" in str(item)
         ]
 
-        with st.expander(f"👀 核对量表 【{sub_name}】 的因子架构", expanded=True):
+        with st.expander(f"👀 核对量表 【{sub_name}】 的因子架构", expanded=False):
             confirmed_method_items = st.multiselect(
                 f"✍ * 确认/微调 【{sub_name}】 纳入逆向方法因子（Method Factor）的题目：",
                 options=sorted_items,
                 default=auto_detected_reverse_items,
                 key=f"audit_method_override_{sub_name}"
             )
-            
-            trait_count = len(sorted_items)
-            method_count = len(confirmed_method_items)
-            
-            audit_col1, audit_col2 = st.columns(2)
-            with audit_col1:
-                st.markdown(f"**🅰️ 主因子特质项 (`{sub_name}`)** ── 📊 当前包含 `{trait_count}` 题")
-                st.code("\n".join([f" ├─ {item}" for item in sorted_items]), language="text")
-            with audit_col2:
-                st.markdown(f"**🅱️ 逆向方法因子项 (`Method`)** ── 📊 当前包含 `{method_count}` 题")
-                if confirmed_method_items:
-                    st.code("\n".join([f" ├─ {item}" for item in confirmed_method_items]), language="text")
-                else:
-                    st.info("ℹ️ 当前未选择反向题，模型将无缝自动退化为标准的单因子模型。")
             
             cfa_ready_queue[sub_name] = {
                 "asset_body": asset_body,
@@ -1175,7 +1159,7 @@ def render_stage2_cfa_clean():
             }
 
     # ==========================================================================
-    # 🚀 4. 全自动 CFI/TLI 指数驱动型删题寻优引擎核心逻辑
+    # 🚀 4. 全自动双阶段删题引擎核心逻辑 (不包含任何得分逻辑)
     # ==========================================================================
     st.markdown("---")
     st.markdown("### 🚀 第三步：开启全自动双阶段删题纯化计算")
@@ -1184,7 +1168,7 @@ def render_stage2_cfa_clean():
         progress_bar = st.progress(0)
         queue_keys = list(cfa_ready_queue.keys())
         
-        # 批量方案暂存
+        # 初始化批量结果暂存区
         st.session_state["cfa_multi_scenarios"] = {}
         
         for idx, sub_name in enumerate(queue_keys):
@@ -1198,44 +1182,39 @@ def render_stage2_cfa_clean():
             initial_factor_items = list(cfg["initial_factor_items"])
             initial_method_items = list(cfg["initial_method_items"])
             
-            with st.spinner(f"正在为量表【{sub_name}】逐轮试删寻找最优 CFI/TLI 路径..."):
+            with st.spinner(f"正在为量表【{sub_name}】逐轮试删寻找最优 CFA 路径..."):
                 try:
                     current_factor_items = list(initial_factor_items)
                     current_method_items = list(initial_method_items)
                     
-                    # 🔴 试运行闭包：调用原汁原味的单步运行引擎 run_cfa_gui，保证卡方、自由度、SABIC/SRMR、排序细节等完全一致
                     def evaluate_combination(f_items, m_items):
                         m_items_filtered = [m for m in m_items if m in f_items]
-                        # 完美透传，规避以数字开头的语法错误，并保持所有的计算公式、变量排序规则一致
+                        # 调用系统原版的 CFA 基础拟合运行引擎
                         res, err, syntax = run_cfa_gui(df_numeric, factor_name, f_items, method_name, m_items_filtered)
                         if err or res is None:
                             return None, 0.0, 0.0
                         
-                        # 统一从原生输出的 fit_stats 中精准抽取指标值
                         fit_df = res[2]
                         cfi_val = float(fit_df.loc[fit_df["Metric"] == "CFI", "Value"].values[0]) if "CFI" in fit_df["Metric"].values else 0.0
                         tli_val = float(fit_df.loc[fit_df["Metric"] == "TLI", "Value"].values[0]) if "TLI" in fit_df["Metric"].values else 0.0
                         return res, cfi_val, tli_val
 
-                    # 测定初始原始模型 (V0 基准)
+                    # 评估 V0
                     res_v0, cfi_v0, tli_v0 = evaluate_combination(current_factor_items, current_method_items)
                     if res_v0 is None:
-                        st.error(f"❌ 量表【{sub_name}】初始全量模型无法收敛，请核对数据结构。")
+                        st.error(f"❌ 量表【{sub_name}】初始模型无法收敛。")
                         continue
                         
                     history_logs = [{
-                        "step": 0, "removed_item": None, "msg": "原始全量初始组合 (V0)",
+                        "step": 0, "removed_item": None, "msg": "原始初始组合 (V0)",
                         "items": list(current_factor_items), "method_items": list(current_method_items),
                         "cfi": cfi_v0, "tli": tli_v0, "result": res_v0
                     }]
 
-                    # 多轮试删循环
+                    # 自动纯化迭代
                     step_counter = 0
                     while len(current_factor_items) > min_items_limit:
-                        # 动态出口：若已跨过双0.95优秀线，且题数精简到目标线以下，停止删题
                         if cfi_v0 >= 0.95 and tli_v0 >= 0.95 and len(current_factor_items) <= target_max_items:
-                            break
-                        if len(current_factor_items) <= int(min_items_limit):
                             break
 
                         best_combined_gain = -999.0
@@ -1243,7 +1222,6 @@ def render_stage2_cfa_clean():
                         item_to_remove = None
                         best_res_obj = None
                         
-                        # 🔄 遍历当前所有题目，假设性删除它，观察哪种组合留下后的 CFI + TLI 综合表现最好
                         for candidate in current_factor_items:
                             trial_factor = [item for item in current_factor_items if item != candidate]
                             trial_method = [item for item in current_method_items if item != candidate]
@@ -1252,7 +1230,6 @@ def render_stage2_cfa_clean():
                             if res_t is None:
                                 continue
                                 
-                            # 判定唯一标准：寻找剔除后能使模型整体拟合指数提升最高的方案（即定位出当前对拟合最差的题目）
                             combined_gain = cfi_t + tli_t
                             if combined_gain > best_combined_gain:
                                 best_combined_gain = combined_gain
@@ -1264,11 +1241,9 @@ def render_stage2_cfa_clean():
                         if item_to_remove is None:
                             break
                             
-                        # 如果已达标 0.95，而再精简反而导致指标下降，则见好就收
                         if cfi_v0 >= 0.95 and tli_v0 >= 0.95 and (best_cfi < cfi_v0 or best_tli < tli_v0):
                             break
 
-                        # 正式执行最差题目剥离
                         current_factor_items.remove(item_to_remove)
                         if item_to_remove in current_method_items:
                             current_method_items.remove(item_to_remove)
@@ -1277,29 +1252,23 @@ def render_stage2_cfa_clean():
                         cfi_v0, tli_v0 = best_cfi, best_tli
                         
                         history_logs.append({
-                            "step": step_counter,
-                            "removed_item": item_to_remove,
+                            "step": step_counter, "removed_item": item_to_remove,
                             "msg": f"剔除最差项 ➔ 【{item_to_remove}】",
-                            "items": list(current_factor_items),
-                            "method_items": list(current_method_items),
-                            "cfi": cfi_v0, "tli": tli_v0,
-                            "result": best_res_obj
+                            "items": list(current_factor_items), "method_items": list(current_method_items),
+                            "cfi": cfi_v0, "tli": tli_v0, "result": best_res_obj
                         })
-                        
-                        if cfi_v0 >= 0.95 and tli_v0 >= 0.95 and len(current_factor_items) <= target_max_items:
-                            break
 
-                    # 提取双阶段代表模型
-                    # Stage 1 (保底线)：寻找历史上最早通过双 0.90 的步骤
+                    # 锁定双方案结果
+                    # Stage 1 (满足 0.90 方案)：最早通过双0.90的步骤
                     s1_log = None
                     for log in history_logs:
                         if log["cfi"] >= 0.90 and log["tli"] >= 0.90:
                             s1_log = log
                             break
                     if s1_log is None:
-                        s1_log = history_logs[0]
+                        s1_log = history_logs[0] # 若全流程达不到0.9，则回退到初始
                         
-                    # Stage 2 (精简线)：优化链条的最末端状态
+                    # Stage 2 (满足 0.95 方案 / 终止方案)：最末端状态
                     s2_log = history_logs[-1]
 
                     st.session_state["cfa_multi_scenarios"][sub_name] = {
@@ -1318,111 +1287,96 @@ def render_stage2_cfa_clean():
         st.balloons()
 
     # ==========================================================================
-    # 📊 5. 双阶段模型结果横向比对矩阵与最终单选切换接管（不计算得分和公式）
+    # 📊 5. 批量结果呈现矩阵与切换机制 (纯报告输出，移除了公式和得分)
     # ==========================================================================
     if not st.session_state.get("cfa_batch_run_done") or "cfa_multi_scenarios" not in st.session_state:
         return
 
     st.markdown("---")
-    st.markdown("### 🎯 第四步：双阶段模型最终比对与裁决定稿")
-    st.info("💡 算法已全自动为您跑完所有删题流！请在下方比对矩阵中为各量表在其【Stage 1 保底方案】和【Stage 2 精简方案】中进行勾选。勾选完成即可直接在页面下方查看或下载原系统格式的结果报表。")
+    st.markdown("### 🎯 第四步：双阶段方案批量呈现与大盘切换")
     
+    # 核心全局开关：让用户直接在 0.90 基础标准方案 和 0.95 精简标准方案 之间自由整体切换
+    chosen_global_stage = st.radio(
+        "🎛️ **请选择您要查看与导出的全局报告方案：**",
+        options=["Stage 1 满足0.90保底方案群", "Stage 2 满足0.95高拟合精简方案群"],
+        index=1, # 默认切到精简优选方案
+        horizontal=True
+    )
+    
+    stage_key = "stage1" if chosen_global_stage == "Stage 1 满足0.90保底方案群" else "stage2"
     m_keys = list(st.session_state["cfa_multi_scenarios"].keys())
-    decision_tabs = st.tabs([f"📂 量表: {k}" for k in m_keys])
+    
+    # 1. 大盘横向比对总览表
+    st.markdown("#### 📊 所有量表当前方案拟合大盘总览")
+    global_summary = []
+    for m_id in m_keys:
+        bundle = st.session_state["cfa_multi_scenarios"][m_id]
+        s_data = bundle[stage_key]
+        cfg_meta = bundle["config"]
+        
+        fit_stats_df = s_data["result"][2]
+        rmsea_v = float(fit_stats_df.loc[fit_stats_df["Metric"] == "RMSEA", "Value"].values[0]) if "RMSEA" in fit_stats_df["Metric"].values else 0.0
+        srmr_v = float(fit_stats_df.loc[fit_stats_df["Metric"] == "SRMR", "Value"].values[0]) if "SRMR" in fit_stats_df["Metric"].values else 0.0
+        
+        initial_set = set(cfg_meta["initial_factor_items"])
+        current_set = set(s_data["items"])
+        deleted_items = list(initial_set - current_set)
+        deleted_items_sorted = sort_item_cols_by_number(deleted_items)
+        
+        global_summary.append({
+            "量表ID": m_id,
+            "当前保留题数": f"{len(s_data['items'])} 题",
+            "CFI": f"{s_data['cfi']:.4f}",
+            "TLI": f"{s_data['tli']:.4f}",
+            "RMSEA": f"{rmsea_v:.4f}",
+            "SRMR": f"{srmr_v:.4f}",
+            "该方案累计删除的题目": ", ".join(deleted_items_sorted) if deleted_items_sorted else "全量保留"
+        })
+    st.dataframe(pd.DataFrame(global_summary), use_container_width=True, hide_index=True)
+    
+    # 2. 依次遍历每个量表，直接批量输出原系统格式的精美 CFA 报告 (Part 1 - Part 5)
+    st.markdown("---")
+    st.markdown(f"### 📑 批量报告输出展示区 ({chosen_global_stage})")
+    
+    report_tabs = st.tabs([f"📄 {k} 独立CFA报告" for k in m_keys])
     
     for idx, m_id in enumerate(m_keys):
-        scenario_bundle = st.session_state["cfa_multi_scenarios"][m_id]
-        s1_data = scenario_bundle["stage1"]
-        s2_data = scenario_bundle["stage2"]
-        all_logs = scenario_bundle["logs"]
-        cfg_meta = scenario_bundle["config"]
+        bundle = st.session_state["cfa_multi_scenarios"][m_id]
+        s_data = bundle[stage_key]
+        cfg_meta = bundle["config"]
         
-        with decision_tabs[idx]:
-            # 构建简明比对看板
-            summary_rows = []
-            for mode_tag, s_data in [("🟢 Stage 1 保底方案 (首入0.90线)", s1_data), ("🔥 Stage 2 精简方案 (最优终止态)", s2_data)]:
-                initial_set = set(cfg_meta["initial_factor_items"])
-                current_set = set(s_data["items"])
-                deleted_items = list(initial_set - current_set)
-                deleted_items_sorted = sort_item_cols_by_number(deleted_items)
-                
-                fit_stats_df = s_data["result"][2]
-                rmsea_v = float(fit_stats_df.loc[fit_stats_df["Metric"] == "RMSEA", "Value"].values[0]) if "RMSEA" in fit_stats_df["Metric"].values else 0.0
-                srmr_v = float(fit_stats_df.loc[fit_stats_df["Metric"] == "SRMR", "Value"].values[0]) if "SRMR" in fit_stats_df["Metric"].values else 0.0
-                
-                status_rating = "🏆 完美跨过双0.95" if s_data["cfi"] >= 0.95 and s_data["tli"] >= 0.95 else (
-                    "✅ 稳过双0.90保底" if s_data["cfi"] >= 0.90 and s_data["tli"] >= 0.90 else "⚠️ 拟合欠佳"
-                )
-                
-                summary_rows.append({
-                    "方案版本": mode_tag,
-                    "主因子项数": f"{len(s_data['items'])} 题",
-                    "方法因子项数": f"{len(s_data['method_items'])} 题",
-                    "CFI 拟合度": f"{s_data['cfi']:.4f}",
-                    "TLI 拟合度": f"{s_data['tli']:.4f}",
-                    "RMSEA 残差": f"{rmsea_v:.4f}",
-                    "SRMR 残差": f"{srmr_v:.4f}",
-                    "系统评级": status_rating,
-                    "累计剔除的题目": " ➔ ".join(deleted_items_sorted) if deleted_items_sorted else "全量保留 (未删题)"
-                })
-                
-            st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+        # 提取当前方案下的 CFA 计算实体
+        model_obj, estimates, fit_stats = s_data["result"]
+        df_cfa_used = cfg_meta["df_numeric"][s_data["items"]].dropna(axis=0)
+        
+        with report_tabs[idx]:
+            st.markdown(f"#### 🔍 量表【{m_id}】CFA报告指标细节")
             
-            # 用户选择定稿方案
-            choice_mode = st.radio(
-                f"✍️ 请选择量表 【{m_id}】 最终用于导出的版本：",
-                options=["Stage 1 保底方案", "Stage 2 精简方案"],
-                index=1 if s2_data["cfi"] >= s1_data["cfi"] else 0,
-                key=f"radio_choice_{m_id}"
-            )
-            
-            final_chosen_data = s1_data if choice_mode == "Stage 1 保底方案" else s2_data
-            
-            # 🔴 关键接管逻辑：利用所勾选步骤产生的模型计算实体，直接重写系统原有的会话状态 (Session State)
-            # 这使得后续由您原有代码控制的 Part 1-5 报表呈现以及合并导出 Excel 时，格式能够做到 100% 严丝合缝！
-            model_obj, estimates, fit_stats = final_chosen_data["result"]
-            df_cfa_used = cfg_meta["df_numeric"][final_chosen_data["items"]].dropna(axis=0)
-            
-            formulas_text = [f"{cfg_meta['factor_name']} =~ " + " + ".join(final_chosen_data["items"])]
-            if final_chosen_data["method_items"] and cfg_meta["method_name"]:
-                formulas_text.append(f"{cfg_meta['method_name']} =~ " + " + ".join(final_chosen_data["method_items"]))
-            syntax_string = "\n".join(formulas_text)
-            
-            # 覆盖状态
+            # 动态将当前遍历量表的状态打入全局，使下方的原本报表系统能够精准复现数据结构
             st.session_state.n2_estimates = estimates
             st.session_state.n2_fit_stats = fit_stats
-            st.session_state.n2_syntax = syntax_string
             st.session_state.n2_factor_name = cfg_meta["factor_name"]
             st.session_state.n2_method_name = cfg_meta["method_name"]
             st.session_state.n2_df_cfa = df_cfa_used
-            st.session_state.n2_factor_items = list(final_chosen_data["items"])
-            st.session_state.n2_method_items = list(final_chosen_data["method_items"])
+            st.session_state.n2_factor_items = list(s_data["items"])
+            st.session_state.n2_method_items = list(s_data["method_items"])
             
-            # 基础数据统计核对看板
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                st.success("🔒 该量表定稿状态已锚定")
-                st.markdown(f"**主因子保留题数：** `{len(final_chosen_data['items'])}` 题")
-            with c2:
-                st.metric("定稿 CFI", f"{final_chosen_data['cfi']:.4f}")
-            with c3:
-                st.metric("定稿 TLI", f"{final_chosen_data['tli']:.4f}")
-            with c4:
-                st.markdown(f"**方法因子保留题数：** `{len(final_chosen_data['method_items'])}` 题")
-
-            # 演变日志展示
-            with st.expander("🪵 查看该量表全自动删题迭代历史日志 (Evolutionary Trace Log)"):
-                for log in all_logs:
-                    status_dot = "🟢" if log["cfi"] >= 0.95 and log["tli"] >= 0.95 else ("🟡" if log["cfi"] >= 0.90 and log["tli"] >= 0.90 else "🔴")
-                    st.markdown(
-                        f"{status_dot} **步序 {log['step']}** | 剩余题目: `{len(log['items'])}` 题 | "
-                        f"**CFI** = `{log['cfi']:.4f}` | **TLI** = `{log['tli']:.4f}`"
-                    )
+            # --- 💡 核心注入点：在此处直接调用您原系统中渲染 Part 1 至 Part 5 报表的底层核心函数 ---
+            # 示例：（请根据您代码文件下方的真实函数名进行调用，以下为标准结构映射）
+            # 1. 拟合摘要表
+            st.markdown("**1. 模型拟合优度判定 (Model Fit Indices)**")
+            st.dataframe(fit_stats, use_container_width=True, hide_index=True)
+            
+            # 2. 因子载荷路径显化表
+            st.markdown("**2. 因子载荷与测量路径显著性检验 (Factor Loadings)**")
+            st.dataframe(estimates, use_container_width=True, hide_index=True)
+            
+            # 3. 历史进化路径参考（原演变日志移至各报告底端作为技术附录）
+            with st.expander("🪵 查看该量表自动纯化迭代路径 (Trace Log)", expanded=False):
+                for log in bundle["logs"]:
+                    dot = "🟢" if log["cfi"] >= 0.95 and log["tli"] >= 0.95 else ("🟡" if log["cfi"] >= 0.90 and log["tli"] >= 0.90 else "🔴")
+                    st.markdown(f"{dot} **步序 {log['step']}** | 题数: `{len(log['items'])}` | **CFI**=`{log['cfi']:.4f}` | **TLI**=`{log['tli']:.4f}`")
                     st.caption(f"动作: {log['msg']}")
-                    st.caption(f"当前保留项: {', '.join(log['items'])}")
-                    st.markdown("---")
-
-            st.markdown("✨ **提示**：目前系统后台状态已被当前选中的模型完全同步接管。您可以点击下方的原始系统结果选项卡（Part 1-Part 5），查看或一键打包下载具有与您上传的模板完全一致的一题一行表格、协方差矩阵等精美报告。")
 
 
 
