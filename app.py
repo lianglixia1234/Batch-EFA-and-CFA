@@ -14,7 +14,7 @@ def main():
     # sidebar 永远存在（关键）
     st.sidebar.radio(
         "选择模块",
-        ["数据清洗", "N1分析"],
+        ["数据清洗", "N1分析","N2分析"],
         key="page"
     )
 
@@ -24,6 +24,11 @@ def main():
 
     elif st.session_state.page == "N1分析":
         render_n1_analysis()
+
+    elif st.session_state.page == "N2分析":
+        render_n2_analysis()
+
+
 
 if __name__ == "__main__":
     main()
