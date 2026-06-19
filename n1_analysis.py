@@ -1513,14 +1513,20 @@ def render_stage2_cfa_clean():
                         if fit_stats[col_name].dtype == object:
                             cfi_rows = fit_stats[fit_stats[col_name].astype(str).str.upper() == 'CFI']
                             tli_rows = fit_stats[fit_stats[col_name].astype(str).str.upper() == 'TLI']
+                            
                             if not cfi_rows.empty:
                                 val_cols = [c for c in fit_stats.columns if c != col_name]
-                                try: cfi_val = float(cfi_rows[val_cols[0]].values[0])
-                                catch: pass
+                                try:
+                                    cfi_val = float(cfi_rows[val_cols[0]].values[0])
+                                except (ValueError, IndexError):
+                                    pass  # 明确捕获可能由于空值或类型转换失败带来的错误
+                                    
                             if not tli_rows.empty:
                                 val_cols = [c for c in fit_stats.columns if c != col_name]
-                                try: tli_val = float(tli_rows[val_cols[0]].values[0])
-                                catch: pass
+                                try:
+                                    tli_val = float(tli_rows[val_cols[0]].values[0])
+                                except (ValueError, IndexError):
+                                    pass
 
                 final_result = result
                 final_syntax_used = syntax_used
