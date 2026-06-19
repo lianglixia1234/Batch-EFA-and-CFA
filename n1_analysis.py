@@ -1454,28 +1454,50 @@ def render_stage2_cfa_clean():
             if "factor_items" not in locals(): factor_items = []
             if "method_items" not in locals(): method_items = []
     
-        # 🌟 以下为你提供的高保真原版代码层，原汁原味保留全部备注与多行字符串排序备用方案：
     
-        # --- 3. 模型拟合 ---
+
+        # --- 3. 模型拟合 (多量表独立 Tab 呈现 - 自动纯化删题版) ---
         st.markdown("---")
-        # 已根据要求移除 prelimCFA 勾选框，直接呈现单按钮
-        run_clicked = st.button("🚀 开始运行 CFA 分析", type="primary", key=f"run_main_cfa_btn_{sub_name}")
+        run_clicked = st.button("🚀 开始运行 自动删题CFA 分析", type="primary", key=f"run_main_cfa_btn_{sub_name}")
         
         if run_clicked:
             if not factor_items:
                 st.error("❌ 错误：请至少为主因子选择 1 个题目。")
             else:
-                with st.spinner("正在拟合模型，请稍候..."):
-                    factor_items_for_model = sort_item_cols_by_number(list(factor_items))
-                    method_items_for_model = sort_item_cols_by_number(list(method_items)) if method_items else []
+                # 🛠️ 初始化属于当前量表(sub_name)特有的多轮纯化追踪容器与上限变量
+                trace_logs = []
+                current_step = 1
+                max_steps = 20  # 安全防御死循环上限
+                min_items_limit = 3  # CFA 模型可识别的最低题目数量下限
+                
+                # 深度拷贝当前配置题目池，以便在当前量表 Tab 内部进行动态收缩剔除
+                active_factor_items = sort_item_cols_by_number(list(factor_items))
+                active_method_items = sort_item_cols_by_number(list(method_items)) if method_items else []
+                
+                # 声明最终成果锚定变量
+                final_result = None
+                final_err_msg = None
+                final_syntax_used = None
+                final_name_mapping = {}
+                final_reverse_mapping = {}
+                
+                # 创建渐进式状态轮询加载动画架
+                status_holder = st.empty()
+                
+                # ==================================================================
+                # 🔄 开启 CFA 自动纯化删题引擎核心循环 (目标: CFI >= 0.90 且 TLI >= 0.90)
+                # ==================================================================
+                while current_step <= max_steps:
+                    if len(active_factor_items) < min_items_limit:
+                        status_holder.warning(f"⚠️ 【{sub_name}】触发安全熔断：当前主因子题目数已降至下限 ({min_items_limit} 题)，停止自动纯化。")
+                        break
+                        
+                    status_holder.info(f"🔄 正在运行【{sub_name}】第 **{current_step}** 轮 CFA 拟合评估 (当前主因子剩余: `{len(active_factor_items)}` 题)...")
                     
-                    # ==================================================================
-                    # 🧼 拦截层：在【不修改 run_cfa_gui】的前提下，就地对长文本题目做安全编码
-                    # ==================================================================
-                    # 1. 提取所有参与建模的独特题目
-                    unique_all_items = list(dict.fromkeys(factor_items_for_model + method_items_for_model))
+                    # 1. 提取当前轮次参与建模的独特题目
+                    unique_all_items = list(dict.fromkeys(active_factor_items + active_method_items))
                     
-                    # 2. 建立【原始长文本】->【纯净安全英文变量名】的双向映射字典
+                    # 2. 建立【原始长文本】->【纯净安全英文变量名】的双向映射字典 (防 Syntax Error 拦截层)
                     name_mapping = {item: f"v{idx + 1}" for idx, item in enumerate(unique_all_items)}
                     reverse_mapping = {f"v{idx + 1}": item for idx, item in enumerate(unique_all_items)}
                     
@@ -1484,10 +1506,10 @@ def render_stage2_cfa_clean():
                     df_numeric_encoded = df_numeric_encoded.rename(columns=name_mapping)
                     
                     # 4. 将输入给函数的题目列表，安全转换为纯净的临时变量名
-                    encoded_factor_items = [name_mapping[x] for x in factor_items_for_model]
-                    encoded_method_items = [name_mapping[x] for x in method_items_for_model] if method_items_for_model else []
+                    encoded_factor_items = [name_mapping[x] for x in active_factor_items]
+                    encoded_method_items = [name_mapping[x] for x in active_method_items] if active_method_items else []
                     
-                    # 5. 调用原版 run_cfa_gui (此时传进去的列名全变为了安全的 v1, v2...)
+                    # 5. 调用原版 run_cfa_gui (不侵入修改其内部)
                     result, err_msg, syntax_used = run_cfa_gui(
                         df_numeric_encoded, 
                         factor_name, 
@@ -1497,45 +1519,148 @@ def render_stage2_cfa_clean():
                     )
                     
                     if err_msg:
-                        st.error(err_msg)
-                        st.code(syntax_used, language="text")
+                        final_err_msg = err_msg
+                        final_syntax_used = syntax_used
+                        break
+                    
+                    # 正常拟合成功，拆解数据结构进行指标诊断
+                    model_obj, estimates_raw, fit_stats = result
+                    
+                    # 智能抽取关键判断指标 (自动兼容字典或 DataFrame 结构)
+                    cfi_val = fit_stats.get("CFI", 0.0) if isinstance(fit_stats, dict) else fit_stats.loc[fit_stats['Metric'] == 'CFI', 'Value'].values[0] if 'Metric' in fit_stats.columns else 0.0
+                    tli_val = fit_stats.get("TLI", 0.0) if isinstance(fit_stats, dict) else fit_stats.loc[fit_stats['Metric'] == 'TLI', 'Value'].values[0] if 'Metric' in fit_stats.columns else 0.0
+                    
+                    # 安全清洗转型确保数值参与比较
+                    try: cfi_val = float(cfi_val)
+                    except: cfi_val = 0.0
+                    try: tli_val = float(tli_val)
+                    except: tli_val = 0.0
+                    
+                    # 缓存当前轮的运行快照成果，作为最终展现给用户的最佳成果
+                    final_result = result
+                    final_syntax_used = syntax_used
+                    final_name_mapping = name_mapping
+                    final_reverse_mapping = reverse_mapping
+                    
+                    # 🎯 【自动追求目标】：若 CFI >= 0.90 且 TLI >= 0.90，则满足要求，纯化结束提前跳出！
+                    if cfi_val >= 0.90 and tli_val >= 0.90:
+                        trace_logs.append({
+                            "round": current_step,
+                            "items_count": len(active_factor_items),
+                            "cfi": cfi_val,
+                            "tli": tli_val,
+                            "action": "✨ 模型拟合指标成功达标（CFI与TLI均 >= 0.90），自动纯化圆满结束！",
+                            "deleted_item": "无"
+                        })
+                        break
+                        
+                    # 🕵️‍♂️ 【模型未达标，开启删题程序】：捞出主因子载荷估计表，寻找标准化系数最低的劣质题目进行剔除
+                    df_est_check = estimates_raw.copy()
+                    
+                    # 过滤出操作符为 '=~' 载荷路径，且左侧为当前主因子的题目行 (此时内部为安全编码名如 v1, v2)
+                    loadings_df = df_est_check[(df_est_check['op'] == '=~') & (df_est_check['LHS'] == factor_name)]
+                    
+                    # 优先取标准化载荷 'Std.all'，如不存在则兜底使用非标准化载荷 'Estimate'
+                    target_col = 'Std.all' if 'Std.all' in loadings_df.columns else 'Estimate'
+                    
+                    if not loadings_df.empty:
+                        # 转换并确保数值合法，按载荷绝对值或原始大小升序排列
+                        loadings_df[target_col] = pd.to_numeric(loadings_df[target_col], errors='coerce').fillna(0.0)
+                        loadings_sorted = loadings_df.sort_values(by=target_col)
+                        
+                        # 锁定本轮贡献度最低的题目（编码名），并利用本轮字典逆向解码出它的中文原名
+                        worst_encoded_item = loadings_sorted.iloc[0]['RHS']
+                        worst_raw_item = reverse_mapping.get(worst_encoded_item, worst_encoded_item)
+                        
+                        # 把淘汰信息录入多量表独立的演进日志中
+                        trace_logs.append({
+                            "round": current_step,
+                            "items_count": len(active_factor_items),
+                            "cfi": cfi_val,
+                            "tli": tli_val,
+                            "action": f"❌ 拟合未达标(CFI:{cfi_val:.3f}, TLI:{tli_val:.3f})，执行删题",
+                            "deleted_item": worst_raw_item
+                        })
+                        
+                        # 从主因子及相关的方法因子序列中安全移除
+                        active_factor_items.remove(worst_raw_item)
+                        if worst_raw_item in active_method_items:
+                            active_method_items.remove(worst_raw_item)
                     else:
-                        model_obj, estimates_raw, fit_stats = result
-                        st.success("✅ 模型拟合成功！")
+                        trace_logs.append({
+                            "round": current_step,
+                            "items_count": len(active_factor_items),
+                            "cfi": cfi_val,
+                            "tli": tli_val,
+                            "action": "⚠️ 未能捕获到有效的主载荷路径，强行终止自动清洗",
+                            "deleted_item": "未知"
+                        })
+                        break
                         
-                        # ==============================================================
-                        # 🔄 解码层：就地将 semopy 算出来的参数表还原为你的中文长文本题目
-                        # ==============================================================
-                        estimates = estimates_raw.copy()
-                        if 'LHS' in estimates.columns:
-                            estimates['LHS'] = estimates['LHS'].apply(lambda x: reverse_mapping.get(x, x))
-                        if 'RHS' in estimates.columns:
-                            estimates['RHS'] = estimates['RHS'].apply(lambda x: reverse_mapping.get(x, x))
-                        
-                        # 还原模型语法展示
-                        syntax_decoded = syntax_used
-                        for enc_name, raw_name in reverse_mapping.items():
-                            syntax_decoded = syntax_decoded.replace(enc_name, raw_name)
-                        
-                        # 🚀 多量表隔离状态注入机制：利用 sub_name 隔离各 Tab 的运行成果，防止串号
-                        st.session_state[f"n2_estimates_{sub_name}"] = estimates
-                        st.session_state[f"n2_fit_stats_{sub_name}"] = fit_stats
-                        st.session_state[f"n2_syntax_{sub_name}"] = syntax_decoded
-                        st.session_state[f"n2_factor_name_{sub_name}"] = factor_name
-                        st.session_state[f"n2_method_name_{sub_name}"] = method_name
-                        
-                        # 同时保留对全局/下游基础下载、计分模块的原版兼容指针
-                        st.session_state.n2_estimates = estimates
-                        st.session_state.n2_fit_stats = fit_stats
-                        st.session_state.n2_syntax = syntax_decoded
-                        st.session_state.n2_factor_name = factor_name
-                        st.session_state.n2_method_name = method_name
-                        
-                        # 保存用于可下载报告：CFA 使用的数据与题目列表 (保持原始长列名数据，确保下游计分不报错)
-                        df_cfa_used = df_numeric[factor_items_for_model].dropna(axis=0)
-                        st.session_state.n2_df_cfa = df_cfa_used
-                        st.session_state.n2_factor_items = list(factor_items_for_model)
-                        st.session_state.n2_method_items = list(method_items_for_model)
+                    current_step += 1
+                
+                # 结束自动清洗，清除临时挂载的过渡状态词
+                status_holder.empty()
+                
+                # ==================================================================
+                # 🏁 纯化终局：解析最后一轮锁定的模型结果，解密还原并按各 Measure 隔离写入 SessionState
+                # ==================================================================
+                if final_err_msg:
+                    st.error(final_err_msg)
+                    st.code(final_syntax_used, language="text")
+                elif final_result:
+                    model_obj, estimates_raw, fit_stats = final_result
+                    st.success(f"🎉【{sub_name}】自动纯化删题 CFA 分析执行完毕！总计迭代历经 **{len(trace_logs)}** 轮清洗。")
+                    
+                    # 📊 战报面板：在当前量表 Tab 内部独立呈现的组件，展示当前 Measure 的删题流转情况
+                    st.markdown("#### 🪵 测量模型自动纯化删题追踪面板 (Trace Log)")
+                    log_records = []
+                    for log in trace_logs:
+                        log_records.append({
+                            "纯化轮次": f"第 {log['round']} 轮",
+                            "当前保留题数": f"{log['items_count']} 题",
+                            "CFI 拟合度": f"{log['cfi']:.3f}",
+                            "TLI 拟合度": f"{log['tli']:.3f}",
+                            "系统纯化决策": log['action'],
+                            "被淘汰剔除题目": log['deleted_item']
+                        })
+                    st.table(pd.DataFrame(log_records))
+                    
+                    # ==============================================================
+                    # 🔄 解码层：就地将 semopy 算出来的参数表还原为当前量表原始中文长文本题目
+                    # ==============================================================
+                    estimates = estimates_raw.copy()
+                    if 'LHS' in estimates.columns:
+                        estimates['LHS'] = estimates['LHS'].apply(lambda x: final_reverse_mapping.get(x, x))
+                    if 'RHS' in estimates.columns:
+                        estimates['RHS'] = estimates['RHS'].apply(lambda x: final_reverse_mapping.get(x, x))
+                    
+                    # 还原模型语法展示
+                    syntax_decoded = final_syntax_used
+                    for enc_name, raw_name in final_reverse_mapping.items():
+                        syntax_decoded = syntax_decoded.replace(enc_name, raw_name)
+                    
+                    # 🚀 多量表隔离状态注入机制：利用 sub_name 隔离各 Tab 的运行成果，防止多量表数据串号
+                    st.session_state[f"n2_estimates_{sub_name}"] = estimates
+                    st.session_state[f"n2_fit_stats_{sub_name}"] = fit_stats
+                    st.session_state[f"n2_syntax_{sub_name}"] = syntax_decoded
+                    st.session_state[f"n2_factor_name_{sub_name}"] = factor_name
+                    st.session_state[f"n2_method_name_{sub_name}"] = method_name
+                    st.session_state[f"n2_trace_logs_{sub_name}"] = trace_logs  # 保存日志副本，确保各量表拥有独立的Trace面板
+                    
+                    # 同时保留对全局/下游基础下载、一键计分模块的原版兼容指针 (指向当前活跃 Tab 模型)
+                    st.session_state.n2_estimates = estimates
+                    st.session_state.n2_fit_stats = fit_stats
+                    st.session_state.n2_syntax = syntax_decoded
+                    st.session_state.n2_factor_name = factor_name
+                    st.session_state.n2_method_name = method_name
+                    
+                    # 保存用于可下载报告：CFA 使用的数据与题目列表 (保持清洗后最终的黄金纯净题数，供下游算总分)
+                    df_cfa_used = df_numeric[active_factor_items].dropna(axis=0)
+                    st.session_state.n2_df_cfa = df_cfa_used
+                    st.session_state.n2_factor_items = list(active_factor_items)
+                    st.session_state.n2_method_items = list(active_method_items)
+
     
         # --- 4. 结果展示 ---
         # 动态调取属于当前量表 Tab 容器的计算结果
