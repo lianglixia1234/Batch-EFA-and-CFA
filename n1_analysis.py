@@ -1046,7 +1046,7 @@ def render_stage1_efa_clean():
                     st.markdown(f"#### 📦 数据集容器: `{d_key}`")
                     for sub_m, config in m_dict.items():
                         st.markdown(
-                            f" * 🟢 内部原生标志: **`{sub_m}`** ── 保留题目: `{len(config['kept_items'])}` 题 "
+                            f" * 🟢:**`{sub_m}`** ── 保留题目: `{len(config['kept_items'])}` 题 "
                         )
 
 # CFA 核心算法区域
@@ -1297,6 +1297,7 @@ def render_stage2_cfa_clean():
 
 
 
+    
     # 🛠️ 第二步：CFA 测量模型结构核对看板 (Tabs 标签切换版)
     # ==========================================================================
     st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对")
@@ -1331,7 +1332,7 @@ def render_stage2_cfa_clean():
                     "clean_df": st.session_state.get("df_source"),
                     "ds_key": "default"
                 }
-
+    
     if not all_upstream_measures:
         st.info("💡 暂未检测到上游 EFA 留存的题目资产结构。已自动使用当前数据集的全部列作为默认量表池。")
         current_df = st.session_state.get("df_source")
@@ -1372,7 +1373,7 @@ def render_stage2_cfa_clean():
                         default_selected=all_items, # 默认预选 EFA 留下来的全部题目
                         show_selection_controls=True,
                     )
-
+    
                 with col2:
                     st.markdown("##### 🅱️ 方法因子 (Method Factor)")
                     method_name = st.text_input(
@@ -1402,7 +1403,7 @@ def render_stage2_cfa_clean():
                             _reset_smart_multiselect_cache(k_suffix)
                         st.session_state[f"{k_suffix}_options_sig"] = sig_val
                         st.session_state[f"{k_suffix}_last_selected"] = def_items
-
+    
                     st.button(
                         '🔄 重新预选方法因子题目', 
                         key=f"tab_btn_reset_method_{sub_name}",
@@ -1429,15 +1430,9 @@ def render_stage2_cfa_clean():
                         "method_items": list(method_items) if method_items else []
                     }
         
-        # 🚀 3. 统一运行与批量调整控制台 (呈现在 Tabs 下方)
+        # 🚀 3. 统一运行与批量调整控制台 (呈呈现在 Tabs 下方)
         # ==========================================================================
-        # 批量分析运行控制台 & 多量表独立分析展示区
-        # ==========================================================================
-        # 说明：从前面 tabs 结构中自动定位用户当前正在操作和核对的量表 sub_name。
-        # 为了保证多量表状态不冲突，我们将数据精准地提取并赋予你原有的变量名：
-        
         if "cfa_ready_queue" in locals() and cfa_ready_queue and active_measure_ids:
-            # 默认将当前循环/选中的量表配置数据映射给原版变量名，实现无缝衔接
             current_active_sub = active_measure_ids[index] # 动态跟随当前 Tab 容器 index
             q_cfg = cfa_ready_queue[current_active_sub]
             
@@ -1447,7 +1442,6 @@ def render_stage2_cfa_clean():
             factor_items = q_cfg["factor_items"]
             method_items = q_cfg["method_items"]
         else:
-            # 兜底旧逻辑变量名（防错处理）
             if "df_numeric" not in locals(): df_numeric = st.session_state.get("df_source")
             if "factor_name" not in locals(): factor_name = "Factor1"
             if "method_name" not in locals(): method_name = "Method"
@@ -1455,28 +1449,32 @@ def render_stage2_cfa_clean():
             if "method_items" not in locals(): method_items = []
     
     
-
     # --- 3. 模型拟合 (多量表独立 Tab 呈现 - 自动纯化删题版) ---
     st.markdown("---")
     run_all_clicked = st.button("🚀 开始运行 所有量表自动删题CFA 分析", type="primary", key="run_all_cfa_global_btn")
     
     if run_all_clicked:
-        # 创建一个全局进度条或汇总动画状态框
         global_status = st.empty()
+        status_holder = st.empty()
         
-        # 🔄 外层：遍历所有量表进行批量离线计算
-        for sub_name in all_measures:
-            # 从 session_state 或配置字典中动态抓取当前量表的用户选题配置
+        # 🔄 修改 3：遍历所有选中的量表进行批量离线计算 (由 all_measures 更换为 active_measure_ids)
+        for sub_name in active_measure_ids:
             factor_items = st.session_state.get(f"factor_items_{sub_name}", [])
             method_items = st.session_state.get(f"method_items_{sub_name}", [])
             factor_name = st.session_state.get(f"factor_name_{sub_name}", "Factor")
             method_name = st.session_state.get(f"method_name_{sub_name}", "Method")
             
             if not factor_items:
-                st.warning(f"⚠️ 量表【{sub_name}】未配置主因子题目，已跳过。")
-                continue
+                # 兜底：如果动态变量中没取到，直接从上游缓存就绪队列中抓取用户当前选择
+                if "cfa_ready_queue" in locals() and sub_name in cfa_ready_queue:
+                    factor_items = cfa_ready_queue[sub_name]["factor_items"]
+                    method_items = cfa_ready_queue[sub_name]["method_items"]
+                    factor_name = cfa_ready_queue[sub_name]["factor_name"]
+                    method_name = cfa_ready_queue[sub_name]["method_name"]
+                else:
+                    st.warning(f"⚠️ 量表【{sub_name}】未配置主因子题目，已跳过。")
+                    continue
                 
-            # 🛠️ 初始化属于当前量表特有的纯化容器与控制变量
             trace_logs = []
             current_step = 1
             max_steps = 20  
@@ -1491,8 +1489,6 @@ def render_stage2_cfa_clean():
             final_name_mapping = {}
             final_reverse_mapping = {}
             
-            # 🔄 内层：当前量表独立的自动追求 CFI/TLI >= 0.9 的删题循环
-            # ==================================================================
             while current_step <= max_steps:
                 if len(active_factor_items) < min_items_limit:
                     status_holder.warning(f"⚠️ 【{sub_name}】触发安全熔断：当前主因子题目数已降至下限 ({min_items_limit} 题)，停止自动纯化。")
@@ -1500,22 +1496,16 @@ def render_stage2_cfa_clean():
                         
                 status_holder.info(f"🔄 正在运行【{sub_name}】第 **{current_step}** 轮 CFA 拟合评估 (当前主因子剩余: `{len(active_factor_items)}` 题)...")
                     
-                # 1. 提取当前轮次参与建模的独特题目
                 unique_all_items = list(dict.fromkeys(active_factor_items + active_method_items))
-                    
-                # 2. 建立【原始长文本】->【纯净安全英文变量名】的双向映射字典
                 name_mapping = {item: f"v{idx + 1}" for idx, item in enumerate(unique_all_items)}
                 reverse_mapping = {f"v{idx + 1}": item for idx, item in enumerate(unique_all_items)}
                     
-                # 3. 将输入的 df_numeric 列名安全替换
                 df_numeric_encoded = df_numeric.copy()
                 df_numeric_encoded = df_numeric_encoded.rename(columns=name_mapping)
                     
-                # 4. 将输入给函数的题目列表，安全转换为纯净的临时变量名
                 encoded_factor_items = [name_mapping[x] for x in active_factor_items]
                 encoded_method_items = [name_mapping[x] for x in active_method_items] if active_method_items else []
                     
-                # 5. 调用原版 run_cfa_gui
                 result, err_msg, syntax_used = run_cfa_gui(
                     df_numeric_encoded, 
                     factor_name, 
@@ -1527,28 +1517,22 @@ def render_stage2_cfa_clean():
                 if err_msg:
                     final_err_msg = err_msg
                     final_syntax_used = syntax_used
+                    st.session_state[f"n2_err_msg_{sub_name}"] = err_msg
+                    st.session_state[f"n2_success_{sub_name}"] = False
                     break
                     
-                # 正常拟合成功，拆解数据结构进行指标诊断
                 model_obj, estimates_raw, fit_stats = result
-                    
-                # 智能抽取关键判断指标
-                cfi_val = fit_stats.get("CFI", 0.0) if isinstance(fit_stats, dict) else fit_stats.loc[fit_stats['Metric'] == 'CFI', 'Value'].values[0] if 'Metric' in fit_stats.columns else 0.0
-                tli_val = fit_stats.get("TLI", 0.0) if isinstance(fit_stats, dict) else fit_stats.loc[fit_stats['Metric'] == 'TLI', 'Value'].values[0] if 'Metric' in fit_stats.columns else 0.0
-                    
-                # 安全清洗转型确保数值参与比较
-                try: cfi_val = float(cfi_val)
+                
+                try: cfi_val = float(fit_stats.get("CFI", 0.0) if isinstance(fit_stats, dict) else fit_stats.loc[fit_stats['Metric'] == 'CFI', 'Value'].values[0])
                 except: cfi_val = 0.0
-                try: tli_val = float(tli_val)
+                try: tli_val = float(fit_stats.get("TLI", 0.0) if isinstance(fit_stats, dict) else fit_stats.loc[fit_stats['Metric'] == 'TLI', 'Value'].values[0])
                 except: tli_val = 0.0
                     
-                # 缓存当前轮的运行快照成果
                 final_result = result
                 final_syntax_used = syntax_used
                 final_name_mapping = name_mapping
                 final_reverse_mapping = reverse_mapping
                     
-                # 🎯 【自动追求目标】
                 if cfi_val >= 0.90 and tli_val >= 0.90:
                     trace_logs.append({
                         "round": current_step,
@@ -1560,7 +1544,6 @@ def render_stage2_cfa_clean():
                     })
                     break
                         
-                # 🕵️‍♂️ 【模型未达标，开启删题程序】
                 df_est_check = estimates_raw.copy()
                 loadings_df = df_est_check[(df_est_check['op'] == '=~') & (df_est_check['LHS'] == factor_name)]
                 target_col = 'Std.all' if 'Std.all' in loadings_df.columns else 'Estimate'
@@ -1597,34 +1580,13 @@ def render_stage2_cfa_clean():
                         
                 current_step += 1
                 
-            # 结束当前量表的自动清洗，清除临时挂载的过渡状态词
             status_holder.empty()
                 
-            # ==================================================================
-            # 🏁 纯化终局：【移出 while 循环，保持在 for 循环层级】
-            # ==================================================================
             if final_err_msg:
-                st.error(final_err_msg)
-                st.code(final_syntax_used, language="text")
+                st.error(f"❌【{sub_name}】运行报错：{final_err_msg}")
             elif final_result:
                 model_obj, estimates_raw, fit_stats = final_result
-                st.success(f"🎉【{sub_name}】自动纯化删题 CFA 分析执行完毕！总计迭代历经 **{len(trace_logs)}** 轮清洗。")
                 
-                # 📊 战报面板
-                st.markdown("#### 🪵 测量模型自动纯化删题追踪面板 (Trace Log)")
-                log_records = []
-                for log in trace_logs:
-                    log_records.append({
-                        "纯化轮次": f"第 {log['round']} 轮",
-                        "当前保留题数": f"{log['items_count']} 题",
-                        "CFI 拟合度": f"{log['cfi']:.3f}",
-                        "TLI 拟合度": f"{log['tli']:.3f}",
-                        "系统纯化决策": log['action'],
-                        "被淘汰剔除题目": log['deleted_item']
-                    })
-                st.table(pd.DataFrame(log_records))
-                
-                # 🔄 解码层
                 estimates = estimates_raw.copy()
                 if 'LHS' in estimates.columns:
                     estimates['LHS'] = estimates['LHS'].apply(lambda x: final_reverse_mapping.get(x, x))
@@ -1635,7 +1597,8 @@ def render_stage2_cfa_clean():
                 for enc_name, raw_name in final_reverse_mapping.items():
                     syntax_decoded = syntax_decoded.replace(enc_name, raw_name)
                 
-                # 🚀 多量表隔离状态注入机制
+                # 🚀 核心修复：在这里注入成功状态，否则下方页面渲染不出
+                st.session_state[f"n2_success_{sub_name}"] = True
                 st.session_state[f"n2_estimates_{sub_name}"] = estimates
                 st.session_state[f"n2_fit_stats_{sub_name}"] = fit_stats
                 st.session_state[f"n2_syntax_{sub_name}"] = syntax_decoded
@@ -1643,20 +1606,18 @@ def render_stage2_cfa_clean():
                 st.session_state[f"n2_method_name_{sub_name}"] = method_name
                 st.session_state[f"n2_trace_logs_{sub_name}"] = trace_logs  
                 
-                # 全局/下游基础下载、一键计分模块的原版兼容指针
+                # 兼容指针
                 st.session_state.n2_estimates = estimates
                 st.session_state.n2_fit_stats = fit_stats
                 st.session_state.n2_syntax = syntax_decoded
                 st.session_state.n2_factor_name = factor_name
                 st.session_state.n2_method_name = method_name
                 
-                # 保存用于可下载报告
                 df_cfa_used = df_numeric[active_factor_items].dropna(axis=0)
                 st.session_state.n2_df_cfa = df_cfa_used
                 st.session_state.n2_factor_items = list(active_factor_items)
                 st.session_state.n2_method_items = list(active_method_items)
     
-        # 4空格缩进，属于 if run_all_clicked 的最终收尾
         global_status.success("🎉 所有量表的自动纯化删题计算已全部批量完成！请在下方 Tab 中查看不同 Measure 的报告。")
     
     
@@ -1666,122 +1627,124 @@ def render_stage2_cfa_clean():
     st.markdown("---")
     st.subheader("📊 各测量模型 (Measure) 纯化分析报告")
     
-    # 用量表列表作为名字，直接生成顶层的多 Measure 标签页
-    measure_tabs = st.tabs(all_measures)
+    if active_measure_ids:
+        measure_tabs = st.tabs([f"{m_id}" for m_id in active_measure_ids])
+        
+        # 🔄 修改 4：将这里原本的 all_measures 更换为 active_measure_ids，保持遍历集合在前后完全统一
+        for idx, sub_name in enumerate(active_measure_ids):
+            with measure_tabs[idx]:
+                if st.session_state.get(f"n2_success_{sub_name}", False):
+                    
+                    # 1. 自动纯化日志面板渲染 (Trace Log)
+                    trace_logs = st.session_state[f"n2_trace_logs_{sub_name}"]
+                    st.markdown(f"##### 🪵 【{sub_name}】自动纯化删题追踪面板")
+                    log_records = []
+                    for log in trace_logs:
+                        log_records.append({
+                            "纯化轮次": f"第 {log['round']} 轮",
+                            "当前保留题数": f"{log['items_count']} 题",
+                            "CFI 拟合度": f"{log['cfi']:.3f}",
+                            "TLI 拟合度": f"{log['tli']:.3f}",
+                            "系统纯化决策": log['action'],
+                            "被淘汰剔除题目": log['deleted_item']
+                        })
+                    st.table(pd.DataFrame(log_records))
+                    
+                    # 2. 🏆 关键模型拟合指标看板 (Top 8 Highlight)
+                    st.markdown("###### 🏆 关键模型拟合指标 (Key Fit Indices)")
+                    stats_dict = st.session_state[f"n2_fit_stats_{sub_name}"]
+                    
+                    def get_val(key):
+                        if isinstance(stats_dict, dict):
+                            val = stats_dict.get(key, np.nan)
+                        elif isinstance(stats_dict, pd.DataFrame) and 'Metric' in stats_dict.columns:
+                            try: val = stats_dict.loc[stats_dict['Metric'] == key, 'Value'].values[0]
+                            except: val = np.nan
+                        else:
+                            val = np.nan
+                        return val if isinstance(val, (int, float)) else np.nan
     
-    for idx, sub_name in enumerate(all_measures):
-        with measure_tabs[idx]:
-            # 检查当前量表在全局计算中是否有成功结果
-            if st.session_state.get(f"n2_success_{sub_name}", False):
-                
-                # 1. 自动纯化日志面板渲染 (Trace Log)
-                trace_logs = st.session_state[f"n2_trace_logs_{sub_name}"]
-                st.markdown(f"##### 🪵 【{sub_name}】自动纯化删题追踪面板")
-                log_records = []
-                for log in trace_logs:
-                    log_records.append({
-                        "纯化轮次": f"第 {log['round']} 轮",
-                        "当前保留题数": f"{log['items_count']} 题",
-                        "CFI 拟合度": f"{log['cfi']:.3f}",
-                        "TLI 拟合度": f"{log['tli']:.3f}",
-                        "系统纯化决策": log['action'],
-                        "被淘汰剔除题目": log['deleted_item']
-                    })
-                st.table(pd.DataFrame(log_records))
-                
-                # 2. 🏆 关键模型拟合指标看板 (Top 8 Highlight)
-                st.markdown("###### 🏆 关键模型拟合指标 (Key Fit Indices)")
-                stats_dict = st.session_state[f"n2_fit_stats_{sub_name}"]
-                
-                def get_val(key):
-                    val = stats_dict.get(key, np.nan)
-                    return val if isinstance(val, (int, float)) else np.nan
+                    metrics = {
+                        "CFI": get_val("CFI"), "TLI": get_val("TLI"), "RMSEA": get_val("RMSEA"), "SRMSR": get_val("SRMR"),
+                        "Chi-Square (User Model)": get_val("chi2"), "AIC": get_val("AIC"), "BIC": get_val("BIC"), "SABIC": get_val("SABIC")
+                    }
     
-                metrics = {
-                    "CFI": get_val("CFI"), "TLI": get_val("TLI"), "RMSEA": get_val("RMSEA"), "SRMSR": get_val("SRMR"),
-                    "Chi-Square (User Model)": get_val("chi2"), "AIC": get_val("AIC"), "BIC": get_val("BIC"), "SABIC": get_val("SABIC")
-                }
+                    m_cols1 = st.columns(4)
+                    keys1 = ["CFI", "TLI", "RMSEA", "SRMSR"]
+                    for i, k in enumerate(keys1):
+                        val = metrics[k]
+                        m_cols1[i].metric(label=k, value=f"{val:.3f}" if not np.isnan(val) else "N/A")
     
-                m_cols1 = st.columns(4)
-                keys1 = ["CFI", "TLI", "RMSEA", "SRMSR"]
-                for i, k in enumerate(keys1):
-                    val = metrics[k]
-                    m_cols1[i].metric(label=k, value=f"{val:.3f}" if not np.isnan(val) else "N/A")
+                    st.markdown("") 
+                    m_cols2 = st.columns(4)
+                    keys2 = ["Chi-Square (User Model)", "AIC", "BIC", "SABIC"] 
+                    for i, k in enumerate(keys2):
+                        val = metrics[k]
+                        m_cols2[i].metric(label=k, value=f"{val:.3f}" if not np.isnan(val) else "N/A")
     
-                st.markdown("") 
-                m_cols2 = st.columns(4)
-                keys2 = ["Chi-Square (User Model)", "AIC", "BIC", "SABIC"] 
-                for i, k in enumerate(keys2):
-                    val = metrics[k]
-                    m_cols2[i].metric(label=k, value=f"{val:.3f}" if not np.isnan(val) else "N/A")
+                    # 3. 📄 详细子标签页：Estimates 与拟合报告
+                    st.markdown("---")
+                    t1, t2 = st.tabs(["📄 详细参数估计 (Estimates)", "🔍 完整拟合报告"])
+                    
+                    with t1:
+                        st.caption("Latent Variables (Factor Loadings) & Covariances")
+                        est_df = st.session_state[f"n2_estimates_{sub_name}"].copy()
+                        fname = st.session_state[f"n2_factor_name_{sub_name}"]
+                        mname = st.session_state[f"n2_method_name_{sub_name}"]
+                        
+                        def get_sort_rank(row):
+                            lhs, op, rhs = row['LHS'], row['op'], row['RHS']
+                            if op == '=~' and lhs == fname: return 1
+                            if op == '=~' and lhs == mname: return 2
+                            if op == '~~' and lhs == rhs and lhs == fname: return 3
+                            if op == '~~' and lhs == rhs and lhs == mname: return 4
+                            if op == '~~' and lhs == rhs and lhs not in [fname, mname]: return 5
+                            return 6
     
-                # 3. 📄 详细子标签页：Estimates 与拟合报告
-                st.markdown("---")
-                t1, t2 = st.tabs(["📄 详细参数估计 (Estimates)", "🔍 完整拟合报告"])
-                
-                with t1:
-                    st.caption("Latent Variables (Factor Loadings) & Covariances")
-                    est_df = st.session_state[f"n2_estimates_{sub_name}"].copy()
-                    fname = st.session_state[f"n2_factor_name_{sub_name}"]
-                    mname = st.session_state[f"n2_method_name_{sub_name}"]
-                    
-                    # --- [原版完全保留] 载荷排序权重规则 Part 1-5 ---
-                    def get_sort_rank(row):
-                        lhs, op, rhs = row['LHS'], row['op'], row['RHS']
-                        if op == '=~' and lhs == fname: return 1
-                        if op == '=~' and lhs == mname: return 2
-                        if op == '~~' and lhs == rhs and lhs == fname: return 3
-                        if op == '~~' and lhs == rhs and lhs == mname: return 4
-                        if op == '~~' and lhs == rhs and lhs not in [fname, mname]: return 5
-                        return 6
-    
-                    est_df['rank'] = est_df.apply(get_sort_rank, axis=1)
-                    est_df = est_df.sort_values('rank').drop(columns=['rank'])
-                    
-                    numeric_cols = est_df.select_dtypes(include=[np.number]).columns
-                    format_dict = {col: "{:.3f}" for col in numeric_cols}
-                    display_cols = ['LHS', 'op', 'RHS', 'Estimate', 'Std.Err', 'z-value', 'P(>|z|)', 'Std.all']
-                    final_cols = [c for c in display_cols if c in est_df.columns]
-                    
-                    st.dataframe(est_df[final_cols].style.format(format_dict))
-                    
-                    csv = est_df[final_cols].to_csv().encode('utf-8-sig')
-                    st.download_button("📥 下载参数估计表", csv, f"cfa_estimates_{sub_name}.csv", "text/csv", key=f"dl_est_btn_{sub_name}")
-                    
-                    # [原版保留] 多行备份代码备用块1
-                    ''' # === 🆕 新增：自定义排序逻辑 === ... '''
-                    
-                with t2:
-                    st.write("### Model Test User Model:")
-                    chi2_val = stats_dict.get('chi2', np.nan)
-                    dof_val = stats_dict.get('DoF', np.nan)
-                    p_val = stats_dict.get('chi2 p-value', np.nan)
-                    
-                    model_test_df = pd.DataFrame({
-                        "Statistic": ["Test statistic", "Degrees of freedom", "P-value (Chi-square)"],
-                        "Value": [
-                            f"{chi2_val:.3f}" if not np.isnan(chi2_val) else "N/A",
-                            f"{int(dof_val)}" if not np.isnan(dof_val) else "N/A",
-                            f"{p_val:.4f}" if not np.isnan(p_val) else "N/A"
-                        ]
-                    })
-                    st.table(model_test_df)
-                    
-                    st.write("### User Model versus Baseline Model:")
-                    fit_df_full = pd.DataFrame([stats_dict]).T
-                    fit_df_full.columns = ["Value"]
-                    st.dataframe(fit_df_full.style.format({"Value": "{:.3f}"}))
-                    
-                    st.markdown("**生成的模型语法 (Syntax Used):**")
-                    st.code(st.session_state[f"n2_syntax_{sub_name}"], language="text")
-                    
-                    # [原版保留] 多行备份代码备用块2
-                    ''' with t2: st.write("所有计算出的拟合指数：") ... '''
-                    
-            else:
-                # 未运行或运行报错的友好提示
-                err_reason = st.session_state.get(f"n2_err_msg_{sub_name}", "尚未点击全局大按钮运行分析")
-                st.info(f"💡 量表【{sub_name}】目前暂无有效模型成果。原因：{err_reason}")
+                        est_df['rank'] = est_df.apply(get_sort_rank, axis=1)
+                        est_df = est_df.sort_values('rank').drop(columns=['rank'])
+                        
+                        numeric_cols = est_df.select_dtypes(include=[np.number]).columns
+                        format_dict = {col: "{:.3f}" for col in numeric_cols}
+                        display_cols = ['LHS', 'op', 'RHS', 'Estimate', 'Std.Err', 'z-value', 'P(>|z|)', 'Std.all']
+                        final_cols = [c for c in display_cols if c in est_df.columns]
+                        
+                        st.dataframe(est_df[final_cols].style.format(format_dict))
+                        
+                        csv = est_df[final_cols].to_csv().encode('utf-8-sig')
+                        st.download_button("📥 下载参数估计表", csv, f"cfa_estimates_{sub_name}.csv", "text/csv", key=f"dl_est_btn_{sub_name}")
+                        
+                    with t2:
+                        st.write("### Model Test User Model:")
+                        chi2_val = get_val("chi2")
+                        dof_val = get_val("DoF")
+                        p_val = get_val("chi2 p-value")
+                        
+                        model_test_df = pd.DataFrame({
+                            "Statistic": ["Test statistic", "Degrees of freedom", "P-value (Chi-square)"],
+                            "Value": [
+                                f"{chi2_val:.3f}" if not np.isnan(chi2_val) else "N/A",
+                                f"{int(dof_val)}" if not np.isnan(dof_val) else "N/A",
+                                f"{p_val:.4f}" if not np.isnan(p_val) else "N/A"
+                            ]
+                        })
+                        st.table(model_test_df)
+                        
+                        st.write("### User Model versus Baseline Model:")
+                        if isinstance(stats_dict, dict):
+                            fit_df_full = pd.DataFrame([stats_dict]).T
+                            fit_df_full.columns = ["Value"]
+                            st.dataframe(fit_df_full.style.format({"Value": "{:.3f}"}))
+                        elif isinstance(stats_dict, pd.DataFrame):
+                            st.dataframe(stats_dict)
+                        
+                        st.markdown("**生成的模型语法 (Syntax Used):**")
+                        st.code(st.session_state[f"n2_syntax_{sub_name}"], language="text")
+                else:
+                    err_reason = st.session_state.get(f"n2_err_msg_{sub_name}", "尚未点击全局大按钮运行分析")
+                    st.info(f"💡 量表【{sub_name}】目前暂无有效模型成果。原因：{err_reason}")
+    else:
+        st.warning("⚠️ 暂无有效的量表可进行报告查看。")
 
 
 
