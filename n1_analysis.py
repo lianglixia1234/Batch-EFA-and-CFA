@@ -1290,7 +1290,7 @@ def render_stage2_cfa_clean():
     with col_param1:
         min_items_limit = st.number_input(
             "🛑 单维度最小保留题目底线",
-            min_value=3, max_value=30, value=3, step=1,
+            min_value=3, max_value=30, value=5, step=1,
             help="当维度内题目数减少到该值时，算法必须触发强制安全保护停止删题，防止被删空。"
         )
 
