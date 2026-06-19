@@ -1042,32 +1042,22 @@ def render_stage1_efa_clean():
 
 # 🧪 2. 自动删题 CFA 板块
 # ==============================================================================
-
-
 def render_stage2_cfa_clean():
     """
-    第二阶段：CFA 双阶段纯化寻优（Stage 1 保底 0.90 -> Stage 2 择优精简）
-    支持自主勾选待分析的量表维度，移除命名微调
+    【CFA 全自动拟合导向型批量删题引擎】
+    唯一核心逻辑：完全根据拟合指数 CFI / TLI 进行逐轮迭代纯化。
+    Stage 1: 保底达标线 (CFI >= 0.90 且 TLI >= 0.90)
+    Stage 2: 优选精简线 (冲刺双 0.95，或精简至目标题目数)
+    
+    【设计原则：100% 结果表样式复刻】
+    1. 内部试删调用原版 `run_cfa_gui`，不污染底层的潜变量方差标定、残差和卡方计算。
+    2. 自动解决数字开头 (如 10_xxx) 的 Syntax Error 语法错误。
+    3. 运行定稿后，直接将计算实体存入系统原有状态，完美继承 Part 1-5 报表与原本的 Excel 导出规范，表格格式完全一致。
     """
-    st.subheader("🔄 CFA 双阶段指标导向型删题引擎")
+    st.subheader("🔄 CFA 双阶段拟合优化全自动删题引擎")
 
     # ==========================================================================
-    # 🧬 1. 状态持久化容器初始化
-    # ==========================================================================
-    if "N2_CFA_final_chosen" not in st.session_state:
-        st.session_state["N2_CFA_final_chosen"] = {}
-        
-    if "cfa_multi_scenarios" not in st.session_state:
-        st.session_state["cfa_multi_scenarios"] = {}
-
-    if "cfa_ready_queue" not in st.session_state:
-        st.session_state["cfa_ready_queue"] = {}
-        
-    if "cfa_batch_run_done" not in st.session_state:
-        st.session_state["cfa_batch_run_done"] = False
-
-    # ==========================================================================
-    # 🔗 2. 默认读取上游保存的各个 measure（资产解包）
+    # 🧬 1. 读取上游 EFA 资产与底层实体数据
     # ==========================================================================
     n1_asset = st.session_state.get("N1_preEFA")
     if not n1_asset:
@@ -1102,13 +1092,13 @@ def render_stage2_cfa_clean():
         return
 
     # ==========================================================================
-    # 🎯 3. 用户自主选择待分析的量表 (新加入的选择层)
+    # 📂 2. 用户自主选择与精简保护参数配置
     # ==========================================================================
     st.markdown("---")
     st.markdown("### 🔍 第一步：勾选您本次需要分析的量表")
     
     selected_measure_ids = st.multiselect(
-        "📂 请在下方选择要拉入 CFA 双阶段删题流的量表（默认全选）：",
+        "📂 请在下方选择要拉入 CFA 自动优化删题流的量表（默认全选）：",
         options=list(all_upstream_measures.keys()),
         default=list(all_upstream_measures.keys())
     )
@@ -1117,373 +1107,321 @@ def render_stage2_cfa_clean():
         st.warning("⚠️ 请至少勾选一个量表以继续分析。")
         return
 
-    # 过滤出用户选中的量表集合
     sub_datasets = {k: all_upstream_measures[k] for k in selected_measure_ids}
 
-    # ==========================================================================
-    # 🎛️ 4. 通用阈值红线设置（默认最小题目限制为 5）
-    # ==========================================================================
+    # 阈值设置：防止某些具有高拟合潜力的维度被过度删题
     col_param1, col_param2 = st.columns(2)
     with col_param1:
         min_items_limit = st.number_input(
-            "🛑 最小题目限制（避免被删空）",
+            "🛑 单维度最小保留题目底线",
             min_value=3, max_value=30, value=5, step=1,
-            help="无论指标多低，当维度题目数达到该值时，算法必须无条件停止删题。"
+            help="当维度内题目数减少到该值时，算法必须触发强制安全保护停止删题，防止被删空。"
         )
     with col_param2:
         target_max_items = st.number_input(
-            "📐 Stage 2 期望的目标精简题数",
+            "📐 Stage 2 期望的目标精简题数参考线",
             min_value=int(min_items_limit), max_value=50, value=10, step=1,
-            help="Stage 2 追求 0.95 时的精简参照线。题目数小于或等于此值时，若已满足基础达标，则停止精简。"
+            help="当题目数大于该值且未迈入0.95优秀线时，算法会继续优选精简。"
         )
 
     # ==========================================================================
-    # 🔍 5. 测量模型结构预审看板
+    # 🛠️ 3. 测量模型结构核对看板 (清晰呈现主因子和方法因子的当前题目数)
     # ==========================================================================
     st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对看板")
 
-    st.session_state.cfa_ready_queue = {}  # 每次重置，确保只处理当前勾选的
+    cfa_ready_queue = {}  
     for sub_name, asset_body in sub_datasets.items():
         factor_items = asset_body.get("items", [])
         if not factor_items:
             continue
-        sorted_items = sorted(list(factor_items))
+        sorted_items = sort_item_cols_by_number(list(factor_items))
 
+        # 预检测反向题项
         auto_detected_reverse_items = [
             item for item in sorted_items 
             if str(item).rstrip().endswith("r") or str(item).rstrip().endswith("_r") or "反向" in str(item)
         ]
 
         with st.expander(f"👀 核对量表 【{sub_name}】 的因子架构", expanded=True):
-            audit_col1, audit_col2 = st.columns(2)
-            with audit_col1:
-                st.markdown(f"**🅰️ 主因子特质项 (`{sub_name}`)**")
-                st.code("\n".join([f" ├─ {item}" for item in sorted_items]), language="text")
-            with audit_col2:
-                st.markdown(f"**🅱️ 逆向方法因子项 (`Method`)**")
-                if auto_detected_reverse_items:
-                    st.code("\n".join([f" ├─ {item}" for item in auto_detected_reverse_items]), language="text")
-                else:
-                    st.info("ℹ️ 无反向题，自动退化为单因子模型。")
-
             confirmed_method_items = st.multiselect(
-                f"✍️ 微调 【{sub_name}】 的反向题因子（如有错漏）：",
+                f"✍ * 确认/微调 【{sub_name}】 纳入逆向方法因子（Method Factor）的题目：",
                 options=sorted_items,
                 default=auto_detected_reverse_items,
                 key=f"audit_method_override_{sub_name}"
             )
             
-            st.session_state.cfa_ready_queue[sub_name] = {
+            trait_count = len(sorted_items)
+            method_count = len(confirmed_method_items)
+            
+            audit_col1, audit_col2 = st.columns(2)
+            with audit_col1:
+                st.markdown(f"**🅰️ 主因子特质项 (`{sub_name}_Trait`)** ── 📊 当前包含 `{trait_count}` 题")
+                st.code("\n".join([f" ├─ {item}" for item in sorted_items]), language="text")
+            with audit_col2:
+                st.markdown(f"**🅱️ 逆向方法因子项 (`{sub_name}_Method`)** ── 📊 当前包含 `{method_count}` 题")
+                if confirmed_method_items:
+                    st.code("\n".join([f" ├─ {item}" for item in confirmed_method_items]), language="text")
+                else:
+                    st.info("ℹ️ 当前未选择反向题，模型将无缝自动退化为标准的单因子模型。")
+            
+            cfa_ready_queue[sub_name] = {
                 "asset_body": asset_body,
-                "trait_factor_name": f"{sub_name}_Trait",
-                "trait_items": sorted_items,
-                "method_factor_name": f"{sub_name}_Method" if confirmed_method_items else None,
-                "method_items": confirmed_method_items
+                "df_numeric": asset_body.get("clean_df"),
+                "factor_name": f"{sub_name}_Trait",
+                "method_name": f"{sub_name}_Method" if confirmed_method_items else None,
+                "initial_factor_items": sorted_items,
+                "initial_method_items": confirmed_method_items
             }
 
     # ==========================================================================
-    # 🚀 6. 双阶段全自动删题引擎核心逻辑
+    # 🚀 4. 全自动 CFI/TLI 指数驱动型删题寻优引擎核心逻辑
     # ==========================================================================
     st.markdown("---")
-    st.markdown("### 🚀 第三步：开始双阶段全自动纯化计算")
+    st.markdown("### 🚀 第三步：开启全自动双阶段删题纯化计算")
     
-    if st.button("🔥 确认已选量表，启动双阶段寻优引擎", type="primary", use_container_width=True):
+    if st.button("🔥 确认以上量表结构，启动双阶段寻优引擎", type="primary", use_container_width=True):
         progress_bar = st.progress(0)
-        queue_keys = list(st.session_state.cfa_ready_queue.keys())
-        st.session_state.cfa_multi_scenarios = {}
+        queue_keys = list(cfa_ready_queue.keys())
+        
+        # 批量方案暂存
+        st.session_state["cfa_multi_scenarios"] = {}
         
         for idx, sub_name in enumerate(queue_keys):
-            cfg = st.session_state.cfa_ready_queue[sub_name]
-            asset_body = cfg["asset_body"]
-            df_run = asset_body.get("clean_df")
-            if df_run is None or df_run.empty:
+            cfg = cfa_ready_queue[sub_name]
+            df_numeric = cfg["df_numeric"]
+            if df_numeric is None or df_numeric.empty:
                 continue
                 
-            trait_items = cfg["trait_items"]
-            method_items = cfg["method_items"]
-            trait_f_name = cfg["trait_factor_name"]
-            method_f_name = cfg["method_factor_name"]
+            factor_name = cfg["factor_name"]
+            method_name = cfg["method_name"]
+            initial_factor_items = list(cfg["initial_factor_items"])
+            initial_method_items = list(cfg["initial_method_items"])
             
-            with st.spinner(f"正在为【{sub_name}】深度计算双阶段删题流..."):
+            with st.spinner(f"正在为量表【{sub_name}】逐轮试删寻找最优 CFI/TLI 路径..."):
                 try:
-                    from semopy import Model, calc_stats
+                    current_factor_items = list(initial_factor_items)
+                    current_method_items = list(initial_method_items)
                     
-                    def _clean_col(name):
-                        return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
-                    
-                    df_cfa_exec = df_run.copy()
-                    rename_map = {c: _clean_col(c) for c in trait_items if c in df_cfa_exec.columns}
-                    df_cfa_exec.rename(columns=rename_map, inplace=True)
-                    reverse_rename = {v: k for k, v in rename_map.items()}
-                    
-                    def run_cfa_metrics(t_items, m_items):
-                        formulas = []
-                        if t_items: formulas.append(f"{trait_f_name} =~ " + " + ".join(t_items))
-                        if m_items: formulas.append(f"{method_f_name} =~ " + " + ".join(m_items))
-                        m = Model("\n".join(formulas))
-                        m.fit(df_cfa_exec)
-                        stats = calc_stats(m)
-                        cfi = float(stats.loc[0, "CFI"]) if "CFI" in stats.columns else 0.5
-                        tli = float(stats.loc[0, "TLI"]) if "TLI" in stats.columns else 0.5
-                        rmsea = float(stats.loc[0, "RMSEA"]) if "RMSEA" in stats.columns else 0.1
-                        srmr = float(stats.loc[0, "SRMR"]) if "SRMR" in stats.columns else 0.1
-                        return m, cfi, tli, rmsea, srmr, stats
+                    # 🔴 试运行闭包：调用原汁原味的单步运行引擎 run_cfa_gui，保证卡方、自由度、SABIC/SRMR、排序细节等完全一致
+                    def evaluate_combination(f_items, m_items):
+                        m_items_filtered = [m for m in m_items if m in f_items]
+                        # 完美透传，规避以数字开头的语法错误，并保持所有的计算公式、变量排序规则一致
+                        res, err, syntax = run_cfa_gui(df_numeric, factor_name, f_items, method_name, m_items_filtered)
+                        if err or res is None:
+                            return None, 0.0, 0.0
+                        
+                        # 统一从原生输出的 fit_stats 中精准抽取指标值
+                        fit_df = res[2]
+                        cfi_val = float(fit_df.loc[fit_df["Metric"] == "CFI", "Value"].values[0]) if "CFI" in fit_df["Metric"].values else 0.0
+                        tli_val = float(fit_df.loc[fit_df["Metric"] == "TLI", "Value"].values[0]) if "TLI" in fit_df["Metric"].values else 0.0
+                        return res, cfi_val, tli_val
 
-                    # ----------------------------------------------------------
-                    # 🏁 Step 1: 首轮基准 V0 运行
-                    # ----------------------------------------------------------
-                    curr_trait = [rename_map[c] for c in trait_items if c in rename_map]
-                    curr_method = [rename_map[c] for c in method_items if c in rename_map]
-                    
-                    mod_v0, cfi_v0, tli_v0, rmsea_v0, srmr_v0, stats_v0 = run_cfa_metrics(curr_trait, curr_method)
-                    
-                    # ----------------------------------------------------------
-                    # 🛡️ Stage 1：质量达标阶段（保底 0.90）
-                    # ----------------------------------------------------------
-                    v0_is_acceptable = (cfi_v0 >= 0.90 and tli_v0 >= 0.90)
-                    delete_history_stage1 = []
-                    
-                    if v0_is_acceptable:
-                        stage1_trait = list(curr_trait)
-                        stage1_method = list(curr_method)
-                        cfi_s1, tli_s1, rmsea_s1, srmr_s1 = cfi_v0, tli_v0, rmsea_v0, srmr_v0
-                        mod_s1, stats_s1 = mod_v0, stats_v0
-                    else:
-                        while len(curr_trait) > min_items_limit:
-                            best_gain = -999.0
-                            item_to_drop = None
-                            best_trial_metrics = None
-                            best_trial_obj = None
+                    # 测定初始原始模型 (V0 基准)
+                    res_v0, cfi_v0, tli_v0 = evaluate_combination(current_factor_items, current_method_items)
+                    if res_v0 is None:
+                        st.error(f"❌ 量表【{sub_name}】初始全量模型无法收敛，请核对数据结构。")
+                        continue
+                        
+                    history_logs = [{
+                        "step": 0, "removed_item": None, "msg": "原始全量初始组合 (V0)",
+                        "items": list(current_factor_items), "method_items": list(current_method_items),
+                        "cfi": cfi_v0, "tli": tli_v0, "result": res_v0
+                    }]
+
+                    # 多轮试删循环
+                    step_counter = 0
+                    while len(current_factor_items) > min_items_limit:
+                        # 动态出口：若已跨过双0.95优秀线，且题数精简到目标线以下，停止删题
+                        if cfi_v0 >= 0.95 and tli_v0 >= 0.95 and len(current_factor_items) <= target_max_items:
+                            break
+                        if len(current_factor_items) <= int(min_items_limit):
+                            break
+
+                        best_combined_gain = -999.0
+                        best_cfi, best_tli = 0.0, 0.0
+                        item_to_remove = None
+                        best_res_obj = None
+                        
+                        # 🔄 遍历当前所有题目，假设性删除它，观察哪种组合留下后的 CFI + TLI 综合表现最好
+                        for candidate in current_factor_items:
+                            trial_factor = [item for item in current_factor_items if item != candidate]
+                            trial_method = [item for item in current_method_items if item != candidate]
                             
-                            for candidate in curr_trait:
-                                trial_t = [c for c in curr_trait if c != candidate]
-                                trial_m = [c for c in curr_method if c != candidate]
-                                try:
-                                    m_t, c_t, t_t, r_t, s_t, st_t = run_cfa_metrics(trial_t, trial_m)
-                                    gain = c_t + t_t
-                                    if gain > best_gain:
-                                        best_gain = gain
-                                        item_to_drop = candidate
-                                        best_trial_metrics = (c_t, t_t, r_t, s_t)
-                                        best_trial_obj = (m_t, st_t)
-                                except:
-                                    continue
+                            res_t, cfi_t, tli_t = evaluate_combination(trial_factor, trial_method)
+                            if res_t is None:
+                                continue
+                                
+                            # 判定唯一标准：寻找剔除后能使模型整体拟合指数提升最高的方案（即定位出当前对拟合最差的题目）
+                            combined_gain = cfi_t + tli_t
+                            if combined_gain > best_combined_gain:
+                                best_combined_gain = combined_gain
+                                best_cfi = cfi_t
+                                best_tli = tli_t
+                                item_to_remove = candidate
+                                best_res_obj = res_t
+
+                        if item_to_remove is None:
+                            break
                             
-                            if item_to_drop:
-                                curr_trait = [c for c in curr_trait if c != item_to_drop]
-                                curr_method = [c for c in curr_method if c != item_to_drop]
-                                delete_history_stage1.append(reverse_rename.get(item_to_drop, str(item_to_drop)))
-                                cfi_t, tli_t, rmsea_t, srmr_t = best_trial_metrics
-                                mod_v1, stats_v1 = best_trial_obj
-                                
-                                if cfi_t >= 0.90 and tli_t >= 0.90:
-                                    break
-                            else:
-                                break
-                                
-                        stage1_trait = list(curr_trait)
-                        stage1_method = list(curr_method)
-                        cfi_s1, tli_s1, rmsea_s1, srmr_s1 = cfi_t, tli_t, rmsea_t, srmr_t
-                        mod_s1, stats_s1 = mod_v1, stats_v1
+                        # 如果已达标 0.95，而再精简反而导致指标下降，则见好就收
+                        if cfi_v0 >= 0.95 and tli_v0 >= 0.95 and (best_cfi < cfi_v0 or best_tli < tli_v0):
+                            break
 
-                    # ----------------------------------------------------------
-                    # 🚀 Stage 2：择优精简阶段（在保底基础上追求 0.95）
-                    # ----------------------------------------------------------
-                    delete_history_stage2 = []
-                    curr_trait_s2 = list(stage1_trait)
-                    curr_method_s2 = list(stage1_method)
-                    cfi_s2, tli_s2, rmsea_s2, srmr_s2 = cfi_s1, tli_s1, rmsea_s1, srmr_s1
-                    mod_s2, stats_s2 = mod_s1, stats_s1
-                    
-                    if len(curr_trait_s2) > target_max_items:
-                        while len(curr_trait_s2) > min_items_limit:
-                            if cfi_s2 >= 0.95 and tli_s2 >= 0.95:
-                                break
-                            if len(curr_trait_s2) <= target_max_items:
-                                break
-                                
-                            best_gain_s2 = -999.0
-                            item_to_drop_s2 = None
-                            best_trial_metrics_s2 = None
-                            best_trial_obj_s2 = None
+                        # 正式执行最差题目剥离
+                        current_factor_items.remove(item_to_remove)
+                        if item_to_remove in current_method_items:
+                            current_method_items.remove(item_to_remove)
                             
-                            for candidate in curr_trait_s2:
-                                trial_t = [c for c in curr_trait_s2 if c != candidate]
-                                trial_m = [c for c in curr_method_s2 if c != candidate]
-                                try:
-                                    m_t, c_t, t_t, r_t, s_t, st_t = run_cfa_metrics(trial_t, trial_m)
-                                    gain = c_t + t_t
-                                    if gain > best_gain_s2:
-                                        best_gain_s2 = gain
-                                        item_to_drop_s2 = candidate
-                                        best_trial_metrics_s2 = (c_t, t_t, r_t, s_t)
-                                        best_trial_obj_s2 = (m_t, st_t)
-                                except:
-                                    continue
-                                    
-                            if item_to_drop_s2:
-                                curr_trait_s2 = [c for c in curr_trait_s2 if c != item_to_drop_s2]
-                                curr_method_s2 = [c for c in curr_method_s2 if c != item_to_drop_s2]
-                                delete_history_stage2.append(reverse_rename.get(item_to_drop_s2, str(item_to_drop_s2)))
-                                cfi_s2, tli_s2, rmsea_s2, srmr_s2 = best_trial_metrics_s2
-                                mod_s2, stats_s2 = best_trial_obj_s2
-                            else:
-                                break
+                        step_counter += 1
+                        cfi_v0, tli_v0 = best_cfi, best_tli
+                        
+                        history_logs.append({
+                            "step": step_counter,
+                            "removed_item": item_to_remove,
+                            "msg": f"剔除最差项 ➔ 【{item_to_remove}】",
+                            "items": list(current_factor_items),
+                            "method_items": list(current_method_items),
+                            "cfi": cfi_v0, "tli": tli_v0,
+                            "result": best_res_obj
+                        })
+                        
+                        if cfi_v0 >= 0.95 and tli_v0 >= 0.95 and len(current_factor_items) <= target_max_items:
+                            break
 
-                    # ----------------------------------------------------------
-                    # 📦 装配和输出
-                    # ----------------------------------------------------------
-                    def package_res_obj(mod, stats, cfi, tli, rmsea, srmr):
-                        dof = int(stats.loc[0, "DoF"]) if "DoF" in stats.columns else 30
-                        return {
-                            "clean_df": df_run, "inspect_df": mod.inspect(),
-                            "metrics": {"cfi": cfi, "tli": tli, "rmsea": rmsea, "srmr": srmr, "chi2": dof * 1.15, "df": dof}
-                        }
+                    # 提取双阶段代表模型
+                    # Stage 1 (保底线)：寻找历史上最早通过双 0.90 的步骤
+                    s1_log = None
+                    for log in history_logs:
+                        if log["cfi"] >= 0.90 and log["tli"] >= 0.90:
+                            s1_log = log
+                            break
+                    if s1_log is None:
+                        s1_log = history_logs[0]
+                        
+                    # Stage 2 (精简线)：优化链条的最末端状态
+                    s2_log = history_logs[-1]
 
-                    orig_items_s1 = [reverse_rename[c] for c in stage1_trait if c in reverse_rename]
-                    orig_method_s1 = [reverse_rename[c] for c in stage1_method if c in reverse_rename]
+                    st.session_state["cfa_multi_scenarios"][sub_name] = {
+                        "config": cfg,
+                        "logs": history_logs,
+                        "stage1": s1_log,
+                        "stage2": s2_log
+                    }
                     
-                    orig_items_s2 = [reverse_rename[c] for c in curr_trait_s2 if c in reverse_rename]
-                    orig_method_s2 = [reverse_rename[c] for c in curr_method_s2 if c in reverse_rename]
-
-                    st.session_state.cfa_multi_scenarios[sub_name] = [
-                        {
-                            "stage": f"🟢 Stage 1: 保底达标模型 (满足 ≥ 0.90 线)",
-                            "item_count": len(orig_items_s1),
-                            "items": orig_items_s1,
-                            "method_items": orig_method_s1,
-                            "cfi": cfi_s1, "tli": tli_s1, "rmsea": rmsea_s1, "srmr": srmr_s1,
-                            "delete_history": delete_history_stage1,
-                            "res_obj": package_res_obj(mod_s1, stats_s1, cfi_s1, tli_s1, rmsea_s1, srmr_s1)
-                        },
-                        {
-                            "stage": f"🔥 Stage 2: 择优精简模型 (冲刺 0.95 或题目数精简至 {target_max_items} 题)",
-                            "item_count": len(orig_items_s2),
-                            "items": orig_items_s2,
-                            "method_items": orig_method_s2,
-                            "cfi": cfi_s2, "tli": tli_s2, "rmsea": rmsea_s2, "srmr": srmr_s2,
-                            "delete_history": delete_history_stage1 + delete_history_stage2,
-                            "res_obj": package_res_obj(mod_s2, stats_s2, cfi_s2, tli_s2, rmsea_s2, srmr_s2)
-                        }
-                    ]
-                except Exception as e:
-                    st.error(f"量表【{sub_name}】运行失败。错误信息: {e}")
+                except Exception as ex:
+                    st.error(f"🚨 量表【{sub_name}】运行中断: {ex}")
                     
             progress_bar.progress((idx + 1) / len(queue_keys))
-        
-        st.session_state.cfa_batch_run_done = True
+            
+        st.session_state["cfa_batch_run_done"] = True
         st.balloons()
 
     # ==========================================================================
-    # 📊 7. 用户交互裁决与最终交付（已移除命名修改文本框）
+    # 📊 5. 双阶段模型结果横向比对矩阵与最终单选切换接管（不计算得分和公式）
     # ==========================================================================
-    if not st.session_state.cfa_batch_run_done or not st.session_state.cfa_multi_scenarios:
+    if not st.session_state.get("cfa_batch_run_done") or "cfa_multi_scenarios" not in st.session_state:
         return
 
     st.markdown("---")
     st.markdown("### 🎯 第四步：双阶段模型最终比对与裁决定稿")
+    st.info("💡 算法已全自动为您跑完所有删题流！请在下方比对矩阵中为各量表在其【Stage 1 保底方案】和【Stage 2 精简方案】中进行勾选。勾选完成即可直接在页面下方查看或下载原系统格式的结果报表。")
     
-    m_keys = list(st.session_state.cfa_multi_scenarios.keys())
-    decision_tabs = st.tabs([f"📂 量表流: {k}" for k in m_keys])
+    m_keys = list(st.session_state["cfa_multi_scenarios"].keys())
+    decision_tabs = st.tabs([f"📂 量表: {k}" for k in m_keys])
     
     for idx, m_id in enumerate(m_keys):
-        schemes_list = st.session_state.cfa_multi_scenarios[m_id]
+        scenario_bundle = st.session_state["cfa_multi_scenarios"][m_id]
+        s1_data = scenario_bundle["stage1"]
+        s2_data = scenario_bundle["stage2"]
+        all_logs = scenario_bundle["logs"]
+        cfg_meta = scenario_bundle["config"]
         
         with decision_tabs[idx]:
-            st.markdown(f"##### 📊 【{m_id}】双阶段算法核心产出对比矩阵")
-            
+            # 构建简明比对看板
             summary_rows = []
-            for s_idx, s in enumerate(schemes_list):
-                cfi_val = s.get("cfi", 0.0)
-                tli_val = s.get("tli", 0.0)
+            for mode_tag, s_data in [("🟢 Stage 1 保底方案 (首入0.90线)", s1_data), ("🔥 Stage 2 精简方案 (最优终止态)", s2_data)]:
+                initial_set = set(cfg_meta["initial_factor_items"])
+                current_set = set(s_data["items"])
+                deleted_items = list(initial_set - current_set)
+                deleted_items_sorted = sort_item_cols_by_number(deleted_items)
                 
-                status_tag = "🎯 冲高至0.95优秀" if cfi_val >= 0.95 and tli_val >= 0.95 else (
-                    "✅ 稳过0.90保底" if cfi_val >= 0.90 and tli_val >= 0.90 else "⚠️ 仍未达标"
+                fit_stats_df = s_data["result"][2]
+                rmsea_v = float(fit_stats_df.loc[fit_stats_df["Metric"] == "RMSEA", "Value"].values[0]) if "RMSEA" in fit_stats_df["Metric"].values else 0.0
+                srmr_v = float(fit_stats_df.loc[fit_stats_df["Metric"] == "SRMR", "Value"].values[0]) if "SRMR" in fit_stats_df["Metric"].values else 0.0
+                
+                status_rating = "🏆 完美跨过双0.95" if s_data["cfi"] >= 0.95 and s_data["tli"] >= 0.95 else (
+                    "✅ 稳过双0.90保底" if s_data["cfi"] >= 0.90 and s_data["tli"] >= 0.90 else "⚠️ 拟合欠佳"
                 )
                 
                 summary_rows.append({
-                    "方案版本": f"选择方案 {s_idx}",
-                    "流程阶段阶段": s.get("stage"),
-                    "最终保留题数": f"{s.get('item_count')} 题",
-                    "CFI 拟合度": f"{cfi_val:.4f}",
-                    "TLI 拟合度": f"{tli_val:.4f}",
-                    "RMSEA 残差": f"{s.get('rmsea', 0.0):.4f}",
-                    "系统评级": status_tag,
-                    "完整删除路径 (按清洗顺序)": " ➔ ".join(s.get("delete_history", [])) if s.get("delete_history") else "首轮即达标 (未删题)"
+                    "方案版本": mode_tag,
+                    "主因子项数": f"{len(s_data['items'])} 题",
+                    "方法因子项数": f"{len(s_data['method_items'])} 题",
+                    "CFI 拟合度": f"{s_data['cfi']:.4f}",
+                    "TLI 拟合度": f"{s_data['tli']:.4f}",
+                    "RMSEA 残差": f"{rmsea_v:.4f}",
+                    "SRMR 残差": f"{srmr_v:.4f}",
+                    "系统评级": status_rating,
+                    "累计剔除的题目": " ➔ ".join(deleted_items_sorted) if deleted_items_sorted else "全量保留 (未删题)"
                 })
-            st.dataframe(pd.DataFrame(summary_rows), use_container_width=True)
+                
+            st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
             
-            selected_idx = st.selectbox(
-                f"💡 请为 【{m_id}】 裁决一个最适合用于论文汇报的定稿方案：",
-                options=range(len(schemes_list)),
-                format_func=lambda x: f"【方案 {x}】{schemes_list[x].get('stage')} ── CFI={schemes_list[x].get('cfi'):.3f} | TLI={schemes_list[x].get('tli'):.3f}",
-                key=f"select_final_decision_{m_id}"
+            # 用户选择定稿方案
+            choice_mode = st.radio(
+                f"✍️ 请选择量表 【{m_id}】 最终用于导出的版本：",
+                options=["Stage 1 保底方案", "Stage 2 精简方案"],
+                index=1 if s2_data["cfi"] >= s1_data["cfi"] else 0,
+                key=f"radio_choice_{m_id}"
             )
             
-            final_choice = schemes_list[selected_idx]
-            st.session_state["N2_CFA_final_chosen"][m_id] = final_choice
+            final_chosen_data = s1_data if choice_mode == "Stage 1 保底方案" else s2_data
             
-            c1, c2 = st.columns(2)
+            # 🔴 关键接管逻辑：利用所勾选步骤产生的模型计算实体，直接重写系统原有的会话状态 (Session State)
+            # 这使得后续由您原有代码控制的 Part 1-5 报表呈现以及合并导出 Excel 时，格式能够做到 100% 严丝合缝！
+            model_obj, estimates, fit_stats = final_chosen_data["result"]
+            df_cfa_used = cfg_meta["df_numeric"][final_chosen_data["items"]].dropna(axis=0)
+            
+            formulas_text = [f"{cfg_meta['factor_name']} =~ " + " + ".join(final_chosen_data["items"])]
+            if final_chosen_data["method_items"] and cfg_meta["method_name"]:
+                formulas_text.append(f"{cfg_meta['method_name']} =~ " + " + ".join(final_chosen_data["method_items"]))
+            syntax_string = "\n".join(formulas_text)
+            
+            # 覆盖状态
+            st.session_state.n2_estimates = estimates
+            st.session_state.n2_fit_stats = fit_stats
+            st.session_state.n2_syntax = syntax_string
+            st.session_state.n2_factor_name = cfg_meta["factor_name"]
+            st.session_state.n2_method_name = cfg_meta["method_name"]
+            st.session_state.n2_df_cfa = df_cfa_used
+            st.session_state.n2_factor_items = list(final_chosen_data["items"])
+            st.session_state.n2_method_items = list(final_chosen_data["method_items"])
+            
+            # 基础数据统计核对看板
+            c1, c2, c3, c4 = st.columns(4)
             with c1:
-                st.success(f"🔒 【{m_id}】方案已锁定！")
-                st.markdown(f"**保留题数：** 共 `{len(final_choice.get('items', []))}` 题")
+                st.success("🔒 该量表定稿状态已锚定")
+                st.markdown(f"**主因子保留题数：** `{len(final_chosen_data['items'])}` 题")
             with c2:
-                st.metric("定稿 CFI", f"{final_choice.get('cfi', 0.0):.4f}")
-                st.metric("定稿 TLI", f"{final_choice.get('tli', 0.0):.4f}")
+                st.metric("定稿 CFI", f"{final_chosen_data['cfi']:.4f}")
+            with c3:
+                st.metric("定稿 TLI", f"{final_chosen_data['tli']:.4f}")
+            with c4:
+                st.markdown(f"**方法因子保留题数：** `{len(final_chosen_data['method_items'])}` 题")
 
-            # 实时直显报表预览
-            st.markdown("#### 👁️ 定稿数据报表即时预览")
-            res_obj_view = final_choice.get("res_obj", {})
-            df_cfa_view = res_obj_view.get("clean_df", pd.DataFrame())
-            factor_items_view = final_choice.get("items", [])
-            method_items_view = final_choice.get("method_items", [])
-            stats_dict_view = res_obj_view.get("metrics", {})
-            
-            item_clean_map_view = {item: _clean_col(item) for item in factor_items_view}
-            
-            view_rows = []
-            for f_idx, item in enumerate(sorted(list(factor_items_view)), start=1):
-                item_clean = item_clean_map_view.get(item, item)
-                is_reverse = 1 if item in method_items_view else 0
-                
-                view_rows.append({
-                    "measure_id (量表名)": m_id,
-                    "item_number (题号)": f_idx,
-                    "item_text (题目)": item,
-                    "reverse (反向标识)": is_reverse,
-                    "CFI": round(stats_dict_view.get("cfi", 1.0), 4),
-                    "TLI": round(stats_dict_view.get("tli", 1.0), 4),
-                    "RMSEA": round(stats_dict_view.get("rmsea", 0.0), 4),
-                    "SRMR": round(stats_dict_view.get("srmr", 0.0), 4),
-                    "item_mean (均值)": round(df_cfa_view[item_clean].mean(), 4) if item_clean in df_cfa_view.columns else np.nan,
-                    "item_sd (标准差)": round(df_cfa_view[item_clean].std(), 4) if item_clean in df_cfa_view.columns else np.nan,
-                })
-            df_items_preview = pd.DataFrame(view_rows)
-            st.dataframe(df_items_preview, use_container_width=True, hide_index=True)
+            # 演变日志展示
+            with st.expander("🪵 查看该量表全自动删题迭代历史日志 (Evolutionary Trace Log)"):
+                for log in all_logs:
+                    status_dot = "🟢" if log["cfi"] >= 0.95 and log["tli"] >= 0.95 else ("🟡" if log["cfi"] >= 0.90 and log["tli"] >= 0.90 else "🔴")
+                    st.markdown(
+                        f"{status_dot} **步序 {log['step']}** | 剩余题目: `{len(log['items'])}` 题 | "
+                        f"**CFI** = `{log['cfi']:.4f}` | **TLI** = `{log['tli']:.4f}`"
+                    )
+                    st.caption(f"动作: {log['msg']}")
+                    st.caption(f"当前保留项: {', '.join(log['items'])}")
+                    st.markdown("---")
 
-            # Excel 直接按量表原名导出（已剔除微调输入框）
-            st.markdown("---")
-            if st.button("🏗️ 编译该维度定稿数据包", key=f"btn_compile_excel_{m_id}"):
-                try:
-                    buf = io.BytesIO()
-                    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-                        df_items_preview.to_excel(writer, sheet_name="Items", index=False)
-                    buf.seek(0)
-                    st.session_state[f"bytes_cache_{m_id}"] = buf.getvalue()
-                    st.session_state[f"filename_cache_{m_id}"] = f"{m_id}_cfa_stage_report_{date.today().strftime('%Y-%m-%d')}.xlsx"
-                    st.success(f"✨ 实体文件【{st.session_state[f'filename_cache_{m_id}']}】编译成功！")
-                except Exception as ex:
-                    st.error(f"Excel 编译失败: {ex}")
-                    
-            if st.session_state.get(f"bytes_cache_{m_id}"):
-                st.download_button(
-                    label=f"⬇️ 立即下载 【{m_id}】 交付级报告",
-                    data=st.session_state[f"bytes_cache_{m_id}"],
-                    file_name=st.session_state.get(f"filename_cache_{m_id}"),
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"download_action_btn_{m_id}"
-                )
-
+            st.markdown("✨ **提示**：目前系统后台状态已被当前选中的模型完全同步接管。您可以点击下方的原始系统结果选项卡（Part 1-Part 5），查看或一键打包下载具有与您上传的模板完全一致的一题一行表格、协方差矩阵等精美报告。")
 
 
 
