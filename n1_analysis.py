@@ -1456,14 +1456,14 @@ def render_stage2_cfa_clean():
     
     
 
-        # --- 3. 模型拟合 (多量表独立 Tab 呈现 - 自动纯化删题版) ---
-        st.markdown("---")
-        run_clicked = st.button("🚀 开始运行 自动删题CFA 分析", type="primary", key=f"run_main_cfa_btn_{sub_name}")
+    # --- 3. 模型拟合 (多量表独立 Tab 呈现 - 自动纯化删题版) ---
+    st.markdown("---")
+    run_clicked = st.button("🚀 开始运行 自动删题CFA 分析", type="primary", key=f"run_main_cfa_btn_{sub_name}")
         
-        if run_clicked:
-            if not factor_items:
-                st.error("❌ 错误：请至少为主因子选择 1 个题目。")
-            else:
+    if run_clicked:
+    if not factor_items:
+    st.error("❌ 错误：请至少为主因子选择 1 个题目。")
+    else:
                 # 🛠️ 初始化属于当前量表(sub_name)特有的多轮纯化追踪容器与上限变量
                 trace_logs = []
                 current_step = 1
