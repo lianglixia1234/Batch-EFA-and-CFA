@@ -1295,14 +1295,6 @@ def render_stage2_cfa_clean():
         )
 
     
-
-    # 清洗列名
-    def clean_col_name(name):
-        return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
-
-    df_analysis.columns = [clean_col_name(c) for c in df_analysis.columns]
-
-    
     
 
 
