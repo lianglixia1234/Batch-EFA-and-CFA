@@ -1160,7 +1160,7 @@ def render_stage2_cfa_clean():
                 st.markdown(f"**🅰️ 主因子特质项 (`{sub_name}`)**")
                 st.code("\n".join([f" ├─ {item}" for item in sorted_items]), language="text")
             with audit_col2:
-                st.markdown(f"**🅱️ 逆向方法因子项 (`_Method`)**")
+                st.markdown(f"**🅱️ 逆向方法因子项 (`Method`)**")
                 if auto_detected_reverse_items:
                     st.code("\n".join([f" ├─ {item}" for item in auto_detected_reverse_items]), language="text")
                 else:
