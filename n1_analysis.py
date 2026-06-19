@@ -1037,13 +1037,23 @@ def render_stage1_efa_clean():
                         )
 
 
+
+
 # 🧪 2. 自动删题 CFA 板块
 # ==============================================================================
+import streamlit as st
+import pandas as pd
+import numpy as np
+import re
+import io
+from datetime import date
+
 def render_stage2_cfa_clean():
     """
     第二阶段：CFA 双阶段纯化寻优（Stage 1 保底 0.90 -> Stage 2 择优精简）
+    支持自主勾选待分析的量表维度，移除命名微调
     """
-    st.subheader("🔄 CFA 双阶段指标删题")
+    st.subheader("🔄 CFA 双阶段指标导向型删题引擎")
 
     # ==========================================================================
     # 🧬 1. 状态持久化容器初始化
@@ -1061,20 +1071,19 @@ def render_stage2_cfa_clean():
         st.session_state["cfa_batch_run_done"] = False
 
     # ==========================================================================
-    # 🔗 2. 上游资产解包
+    # 🔗 2. 默认读取上游保存的各个 measure（资产解包）
     # ==========================================================================
     n1_asset = st.session_state.get("N1_preEFA")
     if not n1_asset:
         st.info("💡 暂未检测到 N1_preEFA 结果。请确保在前置 EFA 模块中完成了分析并保存。")
         return
 
-    sub_datasets = {}
+    all_upstream_measures = {}
     if isinstance(n1_asset, dict):
         for ds_key, measure_dict in n1_asset.items():
             if isinstance(measure_dict, dict):
                 for m_id, m_config in measure_dict.items():
                     if isinstance(m_config, dict) and "kept_items" in m_config:
-                        composite_key = f"{m_id}"
                         raw_df_entity = m_config.get("clean_df")
                         
                         if raw_df_entity is None:
@@ -1085,29 +1094,43 @@ def render_stage2_cfa_clean():
                             else:
                                 raw_df_entity = st.session_state.get("df_source")
                         
-                        sub_datasets[composite_key] = {
+                        all_upstream_measures[str(m_id)] = {
                             "items": m_config["kept_items"],  
                             "clean_df": raw_df_entity,        
                             "measure_id_raw": m_id,
                             "ds_key": ds_key
                         }
 
-    if not sub_datasets:
-        st.error("❌ 无法从上游提取到有效的子数据集。")
+    if not all_upstream_measures:
+        st.error("❌ 无法从上游提取到任何有效的量表数据。")
         return
-        
-    st.success(f"📊 成功加载上游资产，共有 `{len(sub_datasets)}` 个维度待处理。")
 
     # ==========================================================================
-    # 🎛️ 3. 通用阈值红线设置（先问用户设置的限制，默认5）
+    # 🎯 3. 用户自主选择待分析的量表 (新加入的选择层)
     # ==========================================================================
     st.markdown("---")
-    st.markdown("### 🎛️ 第一步：设定自动化算法的安全红线与目标")
+    st.markdown("### 🔍 第一步：勾选您本次需要分析的量表")
     
+    selected_measure_ids = st.multiselect(
+        "📂 请在下方选择要拉入 CFA 双阶段删题流的量表（默认全选）：",
+        options=list(all_upstream_measures.keys()),
+        default=list(all_upstream_measures.keys())
+    )
+    
+    if not selected_measure_ids:
+        st.warning("⚠️ 请至少勾选一个量表以继续分析。")
+        return
+
+    # 过滤出用户选中的量表集合
+    sub_datasets = {k: all_upstream_measures[k] for k in selected_measure_ids}
+
+    # ==========================================================================
+    # 🎛️ 4. 通用阈值红线设置（默认最小题目限制为 5）
+    # ==========================================================================
     col_param1, col_param2 = st.columns(2)
     with col_param1:
         min_items_limit = st.number_input(
-            "🛑 最小题目限制（避免被删空，安全防线）",
+            "🛑 最小题目限制（避免被删空）",
             min_value=3, max_value=30, value=5, step=1,
             help="无论指标多低，当维度题目数达到该值时，算法必须无条件停止删题。"
         )
@@ -1115,14 +1138,15 @@ def render_stage2_cfa_clean():
         target_max_items = st.number_input(
             "📐 Stage 2 期望的目标精简题数",
             min_value=int(min_items_limit), max_value=50, value=10, step=1,
-            help="Stage 2 追求0.95时的精简参照线。题目数小于或等于此值时，若已满足基础达标，则停止精简。"
+            help="Stage 2 追求 0.95 时的精简参照线。题目数小于或等于此值时，若已满足基础达标，则停止精简。"
         )
 
     # ==========================================================================
-    # 🔍 看板 A：测量模型结构预审
+    # 🔍 5. 测量模型结构预审看板
     # ==========================================================================
-    st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对")
+    st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对看板")
 
+    st.session_state.cfa_ready_queue = {}  # 每次重置，确保只处理当前勾选的
     for sub_name, asset_body in sub_datasets.items():
         factor_items = asset_body.get("items", [])
         if not factor_items:
@@ -1134,7 +1158,7 @@ def render_stage2_cfa_clean():
             if str(item).rstrip().endswith("r") or str(item).rstrip().endswith("_r") or "反向" in str(item)
         ]
 
-        with st.expander(f"👀 核对量表维度 【{sub_name}】 的因子架构", expanded=True):
+        with st.expander(f"👀 核对量表 【{sub_name}】 的因子架构", expanded=True):
             audit_col1, audit_col2 = st.columns(2)
             with audit_col1:
                 st.markdown(f"**🅰️ 主因子特质项 (`{sub_name}_Trait`)**")
@@ -1162,12 +1186,12 @@ def render_stage2_cfa_clean():
             }
 
     # ==========================================================================
-    # 🚀 看板 B：双阶段全自动删题引擎核心逻辑
+    # 🚀 6. 双阶段全自动删题引擎核心逻辑
     # ==========================================================================
     st.markdown("---")
-    st.markdown("### 🚀 第三步：开始双阶段全自动计算")
+    st.markdown("### 🚀 第三步：开始双阶段全自动纯化计算")
     
-    if st.button("🔥 运行自动删题CFA", type="primary", use_container_width=True):
+    if st.button("🔥 确认已选量表，启动双阶段寻优引擎", type="primary", use_container_width=True):
         progress_bar = st.progress(0)
         queue_keys = list(st.session_state.cfa_ready_queue.keys())
         st.session_state.cfa_multi_scenarios = {}
@@ -1184,7 +1208,7 @@ def render_stage2_cfa_clean():
             trait_f_name = cfg["trait_factor_name"]
             method_f_name = cfg["method_factor_name"]
             
-            with st.spinner(f"正在为【{sub_name}】计算双阶段删题..."):
+            with st.spinner(f"正在为【{sub_name}】深度计算双阶段删题流..."):
                 try:
                     from semopy import Model, calc_stats
                     
@@ -1196,7 +1220,6 @@ def render_stage2_cfa_clean():
                     df_cfa_exec.rename(columns=rename_map, inplace=True)
                     reverse_rename = {v: k for k, v in rename_map.items()}
                     
-                    # 辅助函数：构建语法、运行 CFA 并抓取统计指标
                     def run_cfa_metrics(t_items, m_items):
                         formulas = []
                         if t_items: formulas.append(f"{trait_f_name} =~ " + " + ".join(t_items))
@@ -1225,20 +1248,17 @@ def render_stage2_cfa_clean():
                     delete_history_stage1 = []
                     
                     if v0_is_acceptable:
-                        # 情况 A：首轮就达标 0.90，直接保存结果
                         stage1_trait = list(curr_trait)
                         stage1_method = list(curr_method)
                         cfi_s1, tli_s1, rmsea_s1, srmr_s1 = cfi_v0, tli_v0, rmsea_v0, srmr_v0
                         mod_s1, stats_s1 = mod_v0, stats_v0
                     else:
-                        # 情况 B：未达标 0.90 -> 触发自动删题循环_basic
                         while len(curr_trait) > min_items_limit:
                             best_gain = -999.0
                             item_to_drop = None
                             best_trial_metrics = None
                             best_trial_obj = None
                             
-                            # 遍历删题测试
                             for candidate in curr_trait:
                                 trial_t = [c for c in curr_trait if c != candidate]
                                 trial_m = [c for c in curr_method if c != candidate]
@@ -1260,11 +1280,10 @@ def render_stage2_cfa_clean():
                                 cfi_t, tli_t, rmsea_t, srmr_t = best_trial_metrics
                                 mod_v1, stats_v1 = best_trial_obj
                                 
-                                # 检查是否成功冲过保底 0.90 线
                                 if cfi_t >= 0.90 and tli_t >= 0.90:
                                     break
                             else:
-                                break # 无法继续优化则跳出
+                                break
                                 
                         stage1_trait = list(curr_trait)
                         stage1_method = list(curr_method)
@@ -1275,23 +1294,15 @@ def render_stage2_cfa_clean():
                     # 🚀 Stage 2：择优精简阶段（在保底基础上追求 0.95）
                     # ----------------------------------------------------------
                     delete_history_stage2 = []
-                    
-                    # 继承 Stage 1 的结果作为 Stage 2 的起点
                     curr_trait_s2 = list(stage1_trait)
                     curr_method_s2 = list(stage1_method)
                     cfi_s2, tli_s2, rmsea_s2, srmr_s2 = cfi_s1, tli_s1, rmsea_s1, srmr_s1
                     mod_s2, stats_s2 = mod_s1, stats_s1
                     
-                    # 判断当前题目数是否满足预先设定的精简要求
                     if len(curr_trait_s2) > target_max_items:
-                        # 触发自动删题循环_best
                         while len(curr_trait_s2) > min_items_limit:
-                            # 🎯 检查停止规则
-                            # 停止情况 1: 题目数虽然大于 target 限制，但拟合已经冲到了 0.95 优秀标准
                             if cfi_s2 >= 0.95 and tli_s2 >= 0.95:
                                 break
-                                
-                            # 停止情况 2: 题目数已经缩减到 <= 目标要求，且在 0.90~0.95 之间
                             if len(curr_trait_s2) <= target_max_items:
                                 break
                                 
@@ -1324,7 +1335,7 @@ def render_stage2_cfa_clean():
                                 break
 
                     # ----------------------------------------------------------
-                    # 📦 装配和序列化输出结果
+                    # 📦 装配和输出
                     # ----------------------------------------------------------
                     def package_res_obj(mod, stats, cfi, tli, rmsea, srmr):
                         dof = int(stats.loc[0, "DoF"]) if "DoF" in stats.columns else 30
@@ -1360,7 +1371,7 @@ def render_stage2_cfa_clean():
                         }
                     ]
                 except Exception as e:
-                    st.error(f"维度【{sub_name}】运行失败，已执行兜底隔离。错误信息: {e}")
+                    st.error(f"量表【{sub_name}】运行失败。错误信息: {e}")
                     
             progress_bar.progress((idx + 1) / len(queue_keys))
         
@@ -1368,7 +1379,7 @@ def render_stage2_cfa_clean():
         st.balloons()
 
     # ==========================================================================
-    # 📊 看板 C：用户裁决
+    # 📊 7. 用户交互裁决与最终交付（已移除命名修改文本框）
     # ==========================================================================
     if not st.session_state.cfa_batch_run_done or not st.session_state.cfa_multi_scenarios:
         return
@@ -1424,7 +1435,7 @@ def render_stage2_cfa_clean():
                 st.metric("定稿 CFI", f"{final_choice.get('cfi', 0.0):.4f}")
                 st.metric("定稿 TLI", f"{final_choice.get('tli', 0.0):.4f}")
 
-            # 🛠️ 实时直显报表预览
+            # 实时直显报表预览
             st.markdown("#### 👁️ 定稿数据报表即时预览")
             res_obj_view = final_choice.get("res_obj", {})
             df_cfa_view = res_obj_view.get("clean_df", pd.DataFrame())
@@ -1454,32 +1465,32 @@ def render_stage2_cfa_clean():
             df_items_preview = pd.DataFrame(view_rows)
             st.dataframe(df_items_preview, use_container_width=True, hide_index=True)
 
-            # Excel 导出
+            # Excel 直接按量表原名导出（已剔除微调输入框）
             st.markdown("---")
-            mid_input = st.text_input(f"✍️ 修改导出报告内的维度名称:", value=str(m_id), key=f"final_report_name_input_{m_id}")
-            
             if st.button("🏗️ 编译该维度定稿数据包", key=f"btn_compile_excel_{m_id}"):
-                mid_final = mid_input.strip() or str(m_id)
                 try:
-                    df_items_preview["measure_id (量表名)"] = mid_final
                     buf = io.BytesIO()
                     with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
                         df_items_preview.to_excel(writer, sheet_name="Items", index=False)
                     buf.seek(0)
                     st.session_state[f"bytes_cache_{m_id}"] = buf.getvalue()
-                    st.session_state[f"filename_cache_{m_id}"] = f"{mid_final}_cfa_stage_report_{date.today().strftime('%Y-%m-%d')}.xlsx"
+                    st.session_state[f"filename_cache_{m_id}"] = f"{m_id}_cfa_stage_report_{date.today().strftime('%Y-%m-%d')}.xlsx"
                     st.success(f"✨ 实体文件【{st.session_state[f'filename_cache_{m_id}']}】编译成功！")
                 except Exception as ex:
                     st.error(f"Excel 编译失败: {ex}")
                     
             if st.session_state.get(f"bytes_cache_{m_id}"):
                 st.download_button(
-                    label=f"⬇️ 立即下载 【{mid_input}】 交付级报告",
+                    label=f"⬇️ 立即下载 【{m_id}】 交付级报告",
                     data=st.session_state[f"bytes_cache_{m_id}"],
                     file_name=st.session_state.get(f"filename_cache_{m_id}"),
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"download_action_btn_{m_id}"
                 )
+
+
+
+
 
 
 
