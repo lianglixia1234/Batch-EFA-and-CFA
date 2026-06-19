@@ -10,6 +10,5 @@ streamlit
 pandas
 numpy
 scipy
-matplotlib
 semopy
 
