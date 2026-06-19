@@ -579,7 +579,7 @@ def render_stage1_efa_clean():
     user_selected_dataset = "Dataset1" # 默认
 
     if data_source == "💾 来自 Data Cleaning（四数据集）":
-        from .data_cleaning_dual import get_dual_mode_analysis_df
+        from data_cleaning_dual import get_dual_mode_analysis_df
         dataset_names = ["Dataset1", "Dataset2", "Dataset3", "Dataset4"]
         selected_dataset = st.selectbox("1. 选择数据集", dataset_names, key="n1_dual_dataset")
         user_selected_dataset = selected_dataset
