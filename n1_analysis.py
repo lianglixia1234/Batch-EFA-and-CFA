@@ -1813,59 +1813,65 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
 
             
             # 1. 统一前缀数字提取函数（例如 1_xxx 或 01_xxx 都能提取出 1）
+            # =============================================================================
+            # 🚀 完全按精确文本与前缀数字进行匹配 (variance_latent & loadings)
+            # =============================================================================
+            
+            # 1. 统一前缀数字提取函数（例如 1_xxx 提取出 1）
             def get_prefix_num(item_str):
                 if not isinstance(item_str, str):
                     return None
                 match = re.match(r'^.*?(\d+)', item_str)
                 return int(match.group(1)) if match else None
             
-            # 获取当前循环中这道题目的前缀数字
+            # 获取当前这道题目的前缀数字
             current_item_num = get_prefix_num(item_raw)
             
-            # 2. 清洗 estimates 数据，去掉任何可能干扰的隐藏空格
+            # 2. 深度清洗并去除隐藏空格，防止因为末尾有空格导致 LHS == RHS 失败
             estimates_clean = final_estimates.copy()
             for col in ['LHS', 'op', 'RHS']:
                 if col in estimates_clean.columns:
                     estimates_clean[col] = estimates_clean[col].astype(str).str.strip()
             
-            # 3. 🎯 严格提取潜变量方差 (variance_latent)
-            # 条件：op 是 '~~'，LHS == RHS，且排除题目（有数字前缀）和 Method 因子
+            # 3. 🎯 提取潜变量方差 (variance_latent)
+            # 精确逻辑：op 是 '~~' 且 LHS 与 RHS 的精确文本完全相同，同时文本中不能含有 "Method" 关键字
             trait_var = np.nan
-            mname_clean = str(mname).strip().lower() if mname else ""
-            
             for _, row in estimates_clean[estimates_clean['op'] == "~~"].iterrows():
-                l_val = row['LHS']
-                r_val = row['RHS']
+                l_text = row['LHS']
+                r_text = row['RHS']
                 
-                # 条件甲：LHS 和 RHS 必须完全相同
-                if l_val == r_val:
-                    # 条件乙：不能是题目（即不能带有数字前缀）
-                    if get_prefix_num(l_val) is None:
-                        # 条件丙：不能是 Method 效应因子
-                        if mname_clean and (mname_clean in l_val.lower()):
-                            continue # 跳过 Method 因子行
+                # 必须完全相等
+                if l_text == r_text:
+                    # 不能包含任何题目的数字前缀 (排除题目自身的残差方差)
+                    if get_prefix_num(l_text) is None:
+                        # 严格排除精确包含 "Method" 的文本
+                        if "Method" in l_text:
+                            continue
                             
-                        # 此时剩下的就是真正的主成分潜变量方差了！
+                        # 此时完全符合：LHS和RHS相同且不是Method时的Estimate值
                         trait_var = _to_num(row.get('Estimate', np.nan))
                         break
             
-            # 4. 提取当前题目的非标准化与标准化载荷
+            # 4. 🎯 提取当前题目的非标准化与标准化载荷 (只要 LHS 或 RHS 包含当前题目数字前缀即命中)
             unstd_load = np.nan
             std_load = np.nan
             
             if current_item_num is not None:
-                # 筛选出属于载荷的操作符行（=~ 或 ~）
+                # 筛选出属于载荷的操作符行
                 loading_rows = estimates_clean[estimates_clean['op'].isin(["=~", "~"])]
                 
                 for _, row in loading_rows.iterrows():
                     lhs_num = get_prefix_num(row['LHS'])
                     rhs_num = get_prefix_num(row['RHS'])
                     
-                    # 核心逻辑：只要这一行的 LHS 或者 RHS 的前缀数字等同于当前题目的数字，即命中！
+                    # 核心：只要这一行的 LHS 或者 RHS 的前缀数字等同于当前题目的数字，即命中
                     if lhs_num == current_item_num or rhs_num == current_item_num:
                         unstd_load = _to_num(row.get('Estimate', np.nan))
                         std_load = _to_num(row.get('Std.all', row.get('Std. All', np.nan)))
                         break
+
+
+# =============================================================================
  
             rows.append({
                 "measure_id": measure_id,
