@@ -1528,9 +1528,6 @@ def render_stage2_cfa_clean():
                         if final_df_cfa.empty or not final_factor_items:
                             st.error("❌ 该量表尚未成功运行，请先运行分析。")
                         else:
-                            # ==============================================================
-                            # 1. 💾 保持原样：保留您原有的 N2_preCFA 一维扁平结构
-                            # ==============================================================
                             if "N2_preCFA" not in st.session_state:
                                 st.session_state["N2_preCFA"] = {}
                             
@@ -1555,22 +1552,18 @@ def render_stage2_cfa_clean():
                             st.session_state["N2_preCFA"][mid] = asset_payload
             
                             # ==============================================================
-                            # 2. 🚀 新增对齐层：直接使用原汁原味的 sub_name 存储至 N1_postCFA
+                            # 🚀 注入资产：把用户在输入框填写的 mid 作为键和内部属性同步带下去
                             # ==============================================================
                             if "N1_postCFA" not in st.session_state:
                                 st.session_state["N1_postCFA"] = {}
                             
-                            # 直接以原来的 sub_name 作为字典的键，存储结构与上游完美等价
                             st.session_state["N1_postCFA"][sub_name] = {
-                                "kept_items": orig_factor_items, # CFA 最终删题后剩下来的题目
-                                "clean_df": final_raw_df,        # 切好这些题目的完整干净原始 DataFrame
-                                "measure_id_show": mid,          # 用户在界面上修改后的展示名称
+                                "kept_items": orig_factor_items,
+                                "clean_df": final_raw_df,
+                                "measure_id_show": mid,          # 🔥 锁定并记录用户填写的 mid
                                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                             }
             
-                            # ==============================================================
-                            # 3. 成功反馈
-                            # ==============================================================
                             st.success(f"✅ 量表 {mid} 已锁定！已按原始键名【{sub_name}】同步至下游。")
                             st.session_state[f"n2_{sub_name}_measure_id"] = mid
                             st.toast(f"🟢 CFA 最终资产已就绪: {sub_name}")
@@ -1729,6 +1722,8 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         estimates = final_estimates
         stats_dict = final_fit
         clean_to_orig = cfg["clean_to_orig"]
+
+        mid = str(measure_id).strip() if measure_id else "measure"
 
         def _to_num(x):
             try:
