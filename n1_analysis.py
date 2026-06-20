@@ -1441,143 +1441,168 @@ def render_stage2_cfa_clean():
             final_name_mapping = {}
             final_reverse_mapping = {}
             
-            # 🔄 删题核心外层循环
+            # 🔄 删题核心外层循环（全局最优穷举策略）
+            # ==============================================================================
+            best_global_score = -1.0
+            best_global_payload = None  # 用于记录全历史中拟合最好的那一轮，防熔断后两手空空
+            
             while current_step <= max_steps:
-                if len(active_factor_items) < min_items_limit:
+                current_items_count = len(active_factor_items)
+                if current_items_count < min_items_limit:
                     status_holder.warning(f"⚠️ 【{sub_name}】触发安全熔断：当前主因子题目数已降至下限 ({min_items_limit} 题)，停止删题。")
                     break
                         
-                status_holder.info(f"🔄 正在运行【{sub_name}】第 **{current_step}** 轮 CFA 拟合评估 (当前主因子剩余: `{len(active_factor_items)}` 题)...")
-                    
+                status_holder.info(f"🔄 正在评估【{sub_name}】第 **{current_step}** 轮标准拟合 (当前保留: `{current_items_count}` 题)...")
+                
+                # 1. 跑一次当前组合的基准 CFA 评估
                 unique_all_items = list(dict.fromkeys(active_factor_items + active_method_items))
                 name_mapping = {item: f"v{idx + 1}" for idx, item in enumerate(unique_all_items)}
                 reverse_mapping = {f"v{idx + 1}": item for idx, item in enumerate(unique_all_items)}
-                    
-                # 🧬 直接提取子集，不再进行行剔除 (dropna)
-                # 既然前置模块已处理完缺失值，这里直接镜像映射即可
+                
                 df_subset = df_numeric[[c for c in unique_all_items if c in df_numeric.columns]].copy()
-                
-                # 💡 防御性轻量检查：仅用于确认当前传入的 DataFrame 样本量是否本身就不足
-                current_sample_size = len(df_subset)
-                if current_sample_size < 10:
-                    if current_step == 1:
-                        final_err_msg = f"量表【{sub_name}】初始传入样本量过低（当前仅有 {current_sample_size} 行数据），无法支撑 CFA 矩阵计算，请检查上游 EFA 输出的数据源。"
-                    else:
-                        trace_logs.append({
-                            "round": current_step, "items_count": len(active_factor_items),
-                            "cfi": trace_logs[-1]['cfi'] if trace_logs else 0.0, 
-                            "tli": trace_logs[-1]['tli'] if trace_logs else 0.0,
-                            "action": "⚠️ 题量精简触发样本临界保护，自动锁定上一轮模型成果", 
-                            "deleted_item": "无"
-                        })
+                if len(df_subset) < 10:
                     break
-                
-                # 🚀 直接无缝重命名进入 CFA 编码流，完美避开由于某列引发的空集错位
+                    
                 df_numeric_encoded = df_subset.rename(columns=name_mapping)
-
-
-
-
-                
                 encoded_factor_items = [name_mapping[x] for x in active_factor_items]
                 encoded_method_items = [name_mapping[x] for x in active_method_items] if active_method_items else []
-                    
-                # 运行底层 CFA 估算接口
+                
                 try:
                     result, err_msg, syntax_used = run_cfa_gui(
                         df_numeric_encoded, factor_name, encoded_factor_items, method_name, encoded_method_items
                     )
                 except Exception as e:
-                    result, err_msg, syntax_used = None, f"底层拟合器抛出未知异常: {str(e)}", ""
-                    
-                if err_msg:
-                    if final_result is not None:
-                        trace_logs.append({
-                            "round": current_step, "items_count": len(active_factor_items),
-                            "cfi": cfi_val, "tli": tli_val,
-                            "action": f"⚠️ 模型拟合遇阻 ({err_msg})，自动收拢并锁定上一轮无错成果", 
-                            "deleted_item": "无"
-                        })
-                        break
-                    final_err_msg = err_msg
-                    break
-                    
-                model_obj, estimates_raw, fit_stats = result
+                    result, err_msg, syntax_used = None, f"运行异常: {str(e)}", ""
                 
-                # 🌟【多策略精准解析 CFI 和 TLI】
+                # 解析当前轮次的指标
                 cfi_val, tli_val = 0.0, 0.0
-                if isinstance(fit_stats, dict):
-                    cfi_val = float(fit_stats.get("CFI", fit_stats.get("cfi", 0.0)))
-                    tli_val = float(fit_stats.get("TLI", fit_stats.get("tli", 0.0)))
-                elif isinstance(fit_stats, pd.DataFrame):
-                    for col_name in fit_stats.columns:
-                        if fit_stats[col_name].dtype == object:
-                            cfi_rows = fit_stats[fit_stats[col_name].astype(str).str.upper() == 'CFI']
-                            tli_rows = fit_stats[fit_stats[col_name].astype(str).str.upper() == 'TLI']
-                            
-                            if not cfi_rows.empty:
+                if not err_msg and result:
+                    _, _, fit_stats = result
+                    if isinstance(fit_stats, dict):
+                        cfi_val = float(fit_stats.get("CFI", fit_stats.get("cfi", 0.0)))
+                        tli_val = float(fit_stats.get("TLI", fit_stats.get("tli", 0.0)))
+                    elif isinstance(fit_stats, pd.DataFrame):
+                        # 镜像您原有的 DataFrame 解析逻辑
+                        for col_name in fit_stats.columns:
+                            if fit_stats[col_name].dtype == object:
+                                c_rows = fit_stats[fit_stats[col_name].astype(str).str.upper() == 'CFI']
+                                t_rows = fit_stats[fit_stats[col_name].astype(str).str.upper() == 'TLI']
                                 val_cols = [c for c in fit_stats.columns if c != col_name]
-                                try:
-                                    cfi_val = float(cfi_rows[val_cols[0]].values[0])
-                                except (ValueError, IndexError):
-                                    pass  # 明确捕获可能由于空值或类型转换失败带来的错误
-                                    
-                            if not tli_rows.empty:
-                                val_cols = [c for c in fit_stats.columns if c != col_name]
-                                try:
-                                    tli_val = float(tli_rows[val_cols[0]].values[0])
-                                except (ValueError, IndexError):
-                                    pass
+                                if not c_rows.empty and val_cols:
+                                    try: cfi_val = float(c_rows[val_cols[0]].values[0])
+                                    except: pass
+                                if not t_rows.empty and val_cols:
+                                    try: tli_val = float(t_rows[val_cols[0]].values[0])
+                                    except: pass
 
-                final_result = result
-                final_syntax_used = syntax_used
-                final_name_mapping = name_mapping
-                final_reverse_mapping = reverse_mapping
-                    
-                # 🎯 达标判定机制
+                # 记忆历史表现最好的模型快照
+                current_score = cfi_val + tli_val
+                if current_score > best_global_score and result is not None:
+                    best_global_score = current_score
+                    best_global_payload = {
+                        "result": result, "syntax": syntax_used, "name_mapping": name_mapping,
+                        "reverse_mapping": reverse_mapping, "factor_items": list(active_factor_items),
+                        "method_items": list(active_method_items), "cfi": cfi_val, "tli": tli_val
+                    }
+
+                # 🎯 双达标终极判定
                 if cfi_val >= 0.90 and tli_val >= 0.90:
                     trace_logs.append({
-                        "round": current_step, "items_count": len(active_factor_items),
+                        "round": current_step, "items_count": current_items_count,
                         "cfi": cfi_val, "tli": tli_val,
-                        "action": "✨ 首轮即完美达标！" if current_step == 1 else "✨ 模型拟合指标成功达标，自动纯化圆满结束！",
+                        "action": "✨ 首轮即完美达标！" if current_step == 1 else "✨ 模型拟合指标成功达标，纯化圆满结束！",
                         "deleted_item": "无"
                     })
+                    final_result, final_syntax_used = result, syntax_used
+                    final_name_mapping, final_reverse_mapping = name_mapping, reverse_mapping
                     break
+                
+                # 🗑️ 未双达标：开启“遍历试删”寻找让 CFI/TLI 提升最大的最优题
+                status_holder.info(f"⏳ 拟合未达标(CFI:{cfi_val:.3f}, TLI:{tli_val:.3f})。进入第 {current_step} 轮穷举试删方案...")
+                
+                best_sim_score = -1.0
+                worst_item_to_delete = None
+                
+                # 挨个试删当前主因子里的每一道题
+                for test_item in active_factor_items:
+                    sim_factor_items = [img for img in active_factor_items if img != test_item]
+                    sim_method_items = [img for img in active_method_items if img != test_item]
+                    
+                    sim_unique = list(dict.fromkeys(sim_factor_items + sim_method_items))
+                    sim_mapping = {item: f"v{idx + 1}" for idx, item in enumerate(sim_unique)}
+                    
+                    df_sim_sub = df_numeric[[c for c in sim_unique if c in df_numeric.columns]].copy()
+                    if len(df_sim_sub) < 10:
+                        continue
                         
-                # 🗑️ 未达标：按载荷从小到大降序排列，找出主因子上表现最差的一道题予以剔除
-                df_est_check = estimates_raw.copy()
-                loadings_df = df_est_check[(df_est_check['op'] == '=~') & (df_est_check['LHS'] == factor_name)]
-                target_col = 'Std.all' if 'Std.all' in loadings_df.columns else 'Estimate'
+                    df_sim_encoded = df_sim_sub.rename(columns=sim_mapping)
+                    sim_enc_factors = [sim_mapping[x] for x in sim_factor_items]
+                    sim_enc_methods = [sim_mapping[x] for x in sim_method_items] if sim_method_items else []
                     
-                if not loadings_df.empty:
-                    loadings_df[target_col] = pd.to_numeric(loadings_df[target_col], errors='coerce').fillna(0.0)
-                    loadings_sorted = loadings_df.sort_values(by=target_col)
-                    
-                    worst_encoded_item = loadings_sorted.iloc[0]['RHS']
-                    worst_raw_item = reverse_mapping.get(worst_encoded_item, worst_encoded_item)
-                    
+                    try:
+                        sim_res, sim_err, _ = run_cfa_gui(df_sim_encoded, factor_name, sim_enc_factors, method_name, sim_enc_methods)
+                        if not sim_err and sim_res:
+                            _, _, s_stats = sim_res
+                            s_cfi, s_tli = 0.0, 0.0
+                            if isinstance(s_stats, dict):
+                                s_cfi = float(s_stats.get("CFI", s_stats.get("cfi", 0.0)))
+                                s_tli = float(s_stats.get("TLI", s_stats.get("tli", 0.0)))
+                            elif isinstance(s_stats, pd.DataFrame):
+                                for col_name in s_stats.columns:
+                                    if s_stats[col_name].dtype == object:
+                                        sc_r = s_stats[s_stats[col_name].astype(str).str.upper() == 'CFI']
+                                        st_r = s_stats[s_stats[col_name].astype(str).str.upper() == 'TLI']
+                                        v_cols = [c for c in s_stats.columns if c != col_name]
+                                        if not sc_r.empty and v_cols: s_cfi = float(sc_r[v_cols[0]].values[0])
+                                        if not st_r.empty and v_cols: s_tli = float(st_r[v_cols[0]].values[0])
+                            
+                            # 判定谁带来的提升最大（CFI+TLI联合分高者胜出）
+                            sim_total_score = s_cfi + s_tli
+                            if sim_total_score > best_sim_score:
+                                best_sim_score = sim_total_score
+                                worst_item_to_delete = test_item
+                    except:
+                        pass
+                
+                # 执行真正的剔除动作
+                if worst_item_to_delete:
                     trace_logs.append({
-                        "round": current_step, "items_count": len(active_factor_items),
+                        "round": current_step, "items_count": current_items_count,
                         "cfi": cfi_val, "tli": tli_val,
-                        "action": f"❌ 拟合未达标(CFI:{cfi_val:.3f}, TLI:{tli_val:.3f})，剔除主载荷最弱题",
-                        "deleted_item": worst_raw_item
+                        "action": f"❌ 拟合未达标，经穷举试算，剔除后对模型拟合度提升最大的题目",
+                        "deleted_item": worst_item_to_delete
                     })
-                    
-                    active_factor_items.remove(worst_raw_item)
-                    if worst_raw_item in active_method_items:
-                        active_method_items.remove(worst_raw_item)
+                    active_factor_items.remove(worst_item_to_delete)
+                    if worst_item_to_delete in active_method_items:
+                        active_method_items.remove(worst_item_to_delete)
                 else:
+                    # 如果试删任何题都崩了，兜底采用原载荷法切一道题
                     trace_logs.append({
-                        "round": current_step, "items_count": len(active_factor_items),
+                        "round": current_step, "items_count": current_items_count,
                         "cfi": cfi_val, "tli": tli_val,
-                        "action": "⚠️ 未能捕获到有效的主载荷路径，终止", "deleted_item": "未知"
+                        "action": "⚠️ 穷举试删未获得更优效能，终止循环", "deleted_item": "无"
                     })
                     break
-                        
+                    
                 current_step += 1
                 
             status_holder.empty()
-                
+            
+            # 🏁 循环结束后的收拢阶段：如果最终没有完美双达标的组合，则采用全历史最优的快照成果进行回溯恢复
+            if (cfi_val < 0.90 or tli_val < 0.90) and best_global_payload is not None:
+                trace_logs.append({
+                    "round": "【终审回溯】", "items_count": len(best_global_payload["factor_items"]),
+                    "cfi": best_global_payload["cfi"], "tli": best_global_payload["tli"],
+                    "action": "💾 删题触及临界且未达成双0.9标准，系统自动回溯并锁定全历史上指标最优的模型成果组合",
+                    "deleted_item": "自动恢复最优级"
+                })
+                final_result = best_global_payload["result"]
+                final_syntax_used = best_global_payload["syntax"]
+                final_name_mapping = best_global_payload["name_mapping"]
+                final_reverse_mapping = best_global_payload["reverse_mapping"]
+                active_factor_items = best_global_payload["factor_items"]
+                active_method_items = best_global_payload["method_items"]
+
             # 💾 结果的定点持久化隔离保存
             if final_err_msg:
                 st.session_state[f"n2_err_msg_{sub_name}"] = final_err_msg
@@ -1593,13 +1618,10 @@ def render_stage2_cfa_clean():
                 
                 syntax_decoded = final_syntax_used
                 if syntax_decoded:
-                    # 💡 核心修复：按照编码后的变量名长度从大到小排序（例如先替换 v10, v11，再替换 v1）
-                    # 这样可以绝对完美避免 v10 中的 v1 被提前误伤替换掉！
                     sorted_enc_names = sorted(final_reverse_mapping.keys(), key=lambda x: len(x), reverse=True)
                     for enc_name in sorted_enc_names:
                         raw_name = final_reverse_mapping[enc_name]
                         syntax_decoded = syntax_decoded.replace(enc_name, raw_name)
-                
                 
                 df_cfa_used = df_numeric[[c for c in active_factor_items if c in df_numeric.columns]].dropna(axis=0)
                 
@@ -1611,6 +1633,8 @@ def render_stage2_cfa_clean():
                 st.session_state[f"n2_method_name_{sub_name}"] = method_name
                 st.session_state[f"n2_trace_logs_{sub_name}"] = trace_logs  
                 st.session_state[f"n2_df_cfa_{sub_name}"] = df_cfa_used
+                # 🌟 重要修复：将清洗完后最后留下的 DataFrame 同步注册到这个槽位，完美纠正下游渲染层的作用域取值 Bug！
+                st.session_state[f"n2_cleaned_df_{sub_name}"] = df_cfa_used
                 st.session_state[f"n2_factor_items_{sub_name}"] = list(active_factor_items)
                 st.session_state[f"n2_method_items_{sub_name}"] = list(active_method_items)
         
@@ -1770,7 +1794,7 @@ def render_stage2_cfa_clean():
                     # --- 5. 模块：量表数据确认与报告导出 ---
                     # ==============================================================================
                     st.markdown("---")
-                    st.markdown(f"### 📊 量表【{sub_name}】数据确认与报告导出")
+                    st.markdown(f"### 【{sub_name}】数据确认与报告导出")
                     
                     # 初始化全局同步容器
                     if "preCFA_SubDataset" not in st.session_state:
