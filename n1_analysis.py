@@ -1834,21 +1834,32 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                     estimates_clean[col] = estimates_clean[col].astype(str).str.strip()
             
             # 3. 🎯 提取潜变量方差 (variance_latent)
-            # 精确逻辑：op 是 '~~' 且 LHS 与 RHS 的精确文本完全相同，同时文本中不能含有 "Method" 关键字
+            # 🎯 精准锁死：根据主因子名字 m_name 提取方差 (自动清洗空格与大小写)
+            # =============================================================================
             trait_var = np.nan
-            for _, row in estimates_clean[estimates_clean['op'] == "~~"].iterrows():
-                l_text = row['LHS']
-                r_text = row['RHS']
+            
+            if m_name:
+                # 统一转换成干净的小写字符串
+                target_mname = str(m_name).strip().lower()
                 
-                # 必须完全相等
-                if l_text == r_text:
-                    # 不能包含任何题目的数字前缀 (排除题目自身的残差方差)
-                    if get_prefix_num(l_text) is None:
-                        # 严格排除精确包含 "Method" 的文本
-                        if "Method" in l_text:
-                            continue
-                            
-                        # 此时完全符合：LHS和RHS相同且不是Method时的Estimate值
+                # 遍历所有方差行 (op == '~~')
+                for _, row in estimates_clean[estimates_clean['op'] == "~~"].iterrows():
+                    l_text = str(row['LHS']).strip().lower()
+                    r_text = str(row['RHS']).strip().lower()
+                    
+                    # 严格条件：LHS 和 RHS 必须相等，且必须等同于量表名 m_name
+                    if l_text == r_text and l_text == target_mname:
+                        trait_var = _to_num(row.get('Estimate', np.nan))
+                        break
+            
+            # 如果上面那种极度严格的办法还是没抓到，启动排除法兜底
+            if np.isnan(trait_var):
+                for _, row in estimates_clean[estimates_clean['op'] == "~~"].iterrows():
+                    l_text = str(row['LHS']).strip().lower()
+                    r_text = str(row['RHS']).strip().lower()
+                    
+                    # 只要两端相等，且不是题目（不含题目数字前缀），那它就是主因子方差
+                    if l_text == r_text and get_prefix_num(l_text) is None:
                         trait_var = _to_num(row.get('Estimate', np.nan))
                         break
             
