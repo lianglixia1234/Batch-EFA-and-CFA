@@ -1222,12 +1222,51 @@ def run_cfa_gui(df, factor_name, factor_items, method_name, method_items):
     return (model, estimates, advanced_stats), None, model_desc
 
 
+# 🛠️ 提取至顶部的辅助工具函数
+# ==============================================================================
 
+def _clean_col(name):
+    """列名清洗函数，替换特殊字符"""
+    return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
+
+def _to_num(x):
+    """将输入安全转换为浮点数，处理各种空值"""
+    try:
+        if x is None: 
+            return np.nan
+        if isinstance(x, str):
+            x = x.strip()
+            if x in ("", "-", "nan", "NaN", "None"): 
+                return np.nan
+        return float(x)
+    except (TypeError, ValueError):
+        return np.nan
+
+def _norm_key(k):
+    """规范化字典键名以进行模糊匹配"""
+    return re.sub(r"[^a-z0-9]+", "", str(k).lower())
+
+def _get_any(d, keys, default=np.nan):
+    """从字典中尝试获取多个候选键对应的值并转换为数字"""
+    _stats_norm = {_norm_key(k): v for k, v in d.items()}
+    for k in keys:
+        if k in d:
+            v = _to_num(d.get(k))
+            if not np.isnan(v): 
+                return v
+    for k in keys:
+        nk = _norm_key(k)
+        if nk in _stats_norm:
+            v = _to_num(_stats_norm.get(nk))
+            if not np.isnan(v): 
+                return v
+    return default
 
 
 
 # ==============================================================================
 # 🧪 2. 自动删题 CFA 版
+
 
 
 def render_stage2_cfa_clean():
@@ -1850,37 +1889,17 @@ def render_stage2_cfa_clean():
                                 fname = current_factor_name
                         
                                 # 列名清洗函数
-                                def _clean_col(name):
-                                    return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
+                                
                         
                                 item_clean_map = {item: _clean_col(item) for item in factor_items}
                         
-                                def _to_num(x):
-                                    try:
-                                        if x is None: return np.nan
-                                        if isinstance(x, str):
-                                            x = x.strip()
-                                            if x in ("", "-", "nan", "NaN", "None"): return np.nan
-                                        return float(x)
-                                    except (TypeError, ValueError):
-                                        return np.nan
+                                
                         
-                                def _norm_key(k):
-                                    return re.sub(r"[^a-z0-9]+", "", str(k).lower())
+                                
                         
                                 _stats_norm = {_norm_key(k): v for k, v in stats_dict.items()}
                         
-                                def _get_any(d, keys, default=np.nan):
-                                    for k in keys:
-                                        if k in d:
-                                            v = _to_num(d.get(k))
-                                            if not np.isnan(v): return v
-                                    for k in keys:
-                                        nk = _norm_key(k)
-                                        if nk in _stats_norm:
-                                            v = _to_num(_stats_norm.get(nk))
-                                            if not np.isnan(v): return v
-                                    return default
+                                
                         
                                 # 潜变量方差 (主因子)
                                 trait_var = np.nan
