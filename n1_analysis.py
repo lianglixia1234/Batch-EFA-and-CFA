@@ -1725,13 +1725,36 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         loadings_unstd = {}
         loadings_std = {}
         if "LHS" in estimates.columns and "op" in estimates.columns and "RHS" in estimates.columns:
-            trait_loadings = estimates[(estimates["op"] == "=~") & (estimates["LHS"] == fname)]
+            # 去除空格
+            estimates['op_strip'] = estimates['op'].astype(str).str.strip()
+            estimates['LHS_strip'] = estimates['LHS'].astype(str).str.strip()
+            estimates['RHS_strip'] = estimates['RHS'].astype(str).str.strip()
+            fname_clean = str(fname).strip()
+            # 查找主因子载荷
+            trait_loadings = estimates[(estimates['op_strip'] == "=~") & (estimates['LHS_strip'] == fname_clean)]
             if trait_loadings.empty:
-                trait_loadings = estimates[(estimates["op"] == "~") & (estimates["RHS"] == fname)]
+                # 尝试忽略大小写
+                trait_loadings = estimates[
+                    (estimates['op_strip'] == "=~") & 
+                    (estimates['LHS_strip'].str.lower() == fname_clean.lower())
+                ]
+            if trait_loadings.empty:
+                # 可能 op 是 '~'（回归形式）
+                trait_loadings = estimates[(estimates['op_strip'] == "~") & (estimates['RHS_strip'] == fname_clean)]
+            if trait_loadings.empty:
+                trait_loadings = estimates[
+                    (estimates['op_strip'] == "~") & 
+                    (estimates['RHS_strip'].str.lower() == fname_clean.lower())
+                ]
+            # 提取载荷
             for _, row in trait_loadings.iterrows():
-                item_key = row["RHS"]  # 清洗名
-                loadings_unstd[item_key] = _to_num(row.get("Estimate", np.nan))
-                loadings_std[item_key] = _to_num(row.get("Std.all", np.nan))
+                item_key = row['RHS_strip']  # 清洗名
+                loadings_unstd[item_key] = _to_num(row.get('Estimate', np.nan))
+                loadings_std[item_key] = _to_num(row.get('Std.all', np.nan))
+        
+        
+        
+
 
         def _get_any(d, keys, default=np.nan):
             for k in keys:
@@ -1750,6 +1773,12 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         sorted_items = sort_item_cols_by_number(factor_items)
         rows = []
         for idx, item_clean in enumerate(sorted_items, start=1):
+            
+            item_key = item_clean.strip()   # 关键：去除空格
+            # 后续使用 item_key 去 loadings_unstd 和 loadings_std 中取值
+            unstd = loadings_unstd.get(item_key, np.nan)
+            std = loadings_std.get(item_key, np.nan)
+            
             item_raw = clean_to_orig.get(item_clean, item_clean)
             _, num, text = parse_item_col(item_raw)
             rev = 1 if _is_reverse_coded(item_raw) else 0
@@ -1781,6 +1810,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 "cronbach_alpha": alpha_val,
             })
         sheet_items = pd.DataFrame(rows)
+       
 
         if sheet_items["unstandardised_loading"].isna().all() and sheet_items["standardised_loading"].isna().all():
             st.error("❌ 报告生成失败：未提取到任何载荷，请检查模型是否包含载荷行。")
