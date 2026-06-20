@@ -1484,14 +1484,6 @@ def render_stage2_cfa_clean():
                     if col in est_display.columns:
                         est_display[col] = est_display[col].apply(lambda x: clean_to_orig.get(x, x))
              
-        
-                # 排序...
-                # 转换数值类型...
-                numeric_cols = est_display[display_cols].select_dtypes(include=[np.number]).columns
-                st.dataframe(est_display[display_cols].style.format("{:.3f}", subset=numeric_cols))
-            else:
-                st.warning("无载荷表输出。")
-            
 
                 # 排序
                 def _sort_rank(row):
