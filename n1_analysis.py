@@ -1814,9 +1814,9 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         sheet_items = pd.DataFrame(rows)
        
 
-        if sheet_items["unstandardised_loading"].isna().all() and sheet_items["standardised_loading"].isna().all():
-            st.error("❌ 报告生成失败：未提取到任何载荷，请检查模型是否包含载荷行。")
-            return
+        #if sheet_items["unstandardised_loading"].isna().all() and sheet_items["standardised_loading"].isna().all():
+        #    st.error("❌ 报告生成失败：未提取到任何载荷，请检查模型是否包含载荷行。")
+        #    return
 
         cov_matrix = df_cfa[factor_items].cov()
 
