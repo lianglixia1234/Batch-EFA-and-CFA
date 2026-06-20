@@ -1798,31 +1798,38 @@ def render_stage2_cfa_clean():
                     st.markdown("---")
                     st.markdown(f"### 【{sub_name}】数据确认与报告导出")
                     # --- 5. 生成可下载报告 (measure_id + 题目表 + 协方差矩阵) ---
-                    if all(k in st.session_state for k in ("n2_df_cfa", "n2_factor_items", "n2_estimates", "n2_fit_stats")):
+                    if (
+                        current_df_cfa is not None
+                        and current_estimates is not None
+                        and current_fit_stats is not None
+                    ):
                         st.markdown("---")
                         st.markdown("### 📥 第五部分：生成与下载报告表")
                         
                         # 1. 引导用户填写 Measure_id
                         st.text_input(
                             "量表 measure_id（唯一编码，用于所有可下载文件命名和容器锁定）",
-                            value=(st.session_state.get("n2_measure_id") or ""),
-                            key="n2_measure_id",
+                            value=(st.session_state.get(f"n2_measure_id_{sub_name}") or ""),
+                            key=f"n2_measure_id_{sub_name}",
                             placeholder="如 LQ、EQ 等问卷缩写",
                             help="此 measure_id 将作为最终结果表计入容器的唯一标识，同时用于下方报告文件的命名。",
                         )
-                    
-                        mid = (st.session_state.get("n2_measure_id") or "").strip()
+                        
+                        mid = (
+                            st.session_state.get(f"n2_measure_id_{sub_name}")
+                            or ""
+                        ).strip()
                     
                         if not mid:
                             st.info("💡 请在上方填写 **measure_id** 以解锁报告生成与下载功能。")
                         else:
                             # 2. 当用户填入了 measure_id，自动在后台计算并“同时出现”预览和下载按钮，无需用户二次点击“生成”按钮
                             try:
-                                df_cfa = st.session_state.n2_df_cfa
-                                factor_items = st.session_state.n2_factor_items
-                                estimates = st.session_state.n2_estimates
-                                stats_dict = st.session_state.n2_fit_stats
-                                fname = st.session_state.n2_factor_name
+                                df_cfa = current_df_cfa.copy()
+                                factor_items = current_factor_items.copy()
+                                estimates = current_estimates.copy()
+                                stats_dict = current_fit_stats
+                                fname = current_factor_name
                     
                                 # 列名清洗函数
                                 def _clean_col(name):
@@ -1997,6 +2004,28 @@ def render_stage2_cfa_clean():
                                     sheet_items.to_excel(w, sheet_name="Items", index=False)
                                     cov_matrix.to_excel(w, sheet_name="Covariance", index=True)
                                 excel_bytes = buf.getvalue()
+        
+                                # 保存到 preCFA dataset
+                                # ==========================================================
+                                if "N2_preCFA" not in st.session_state:
+                                    st.session_state["N2_preCFA"] = {}
+                                
+                                st.session_state["N2_preCFA"][mid] = {
+                                    "measure_id": mid,
+                                    "origin_sub_name": sub_name,
+                                    # purified数据
+                                    "clean_df": df_cfa.copy(),
+                                    # 最终保留题目
+                                    "kept_items": list(factor_items),
+                                    # 因子名
+                                    "factor_name": fname,
+                                        ""
+                                    )
+                                }
+
+
+
+                                
                     
                                 # 文件名构建
                                 cfa_type = "prelim_single_cfa" if st.session_state.get("n2_prelim_single_cfa") else "single_cfa"
@@ -2017,7 +2046,7 @@ def render_stage2_cfa_clean():
                                     data=excel_bytes,
                                     file_name=filename,
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    key="n2_download_excel_report_direct",
+                                    key=f"n2_download_excel_report_direct_{sub_name}",
                                 )
                     
                                 # 联动的多表预览
