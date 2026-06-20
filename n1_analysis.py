@@ -1592,8 +1592,14 @@ def render_stage2_cfa_clean():
                     estimates['RHS'] = estimates['RHS'].apply(lambda x: final_reverse_mapping.get(x, x))
                 
                 syntax_decoded = final_syntax_used
-                for enc_name, raw_name in final_reverse_mapping.items():
-                    syntax_decoded = syntax_decoded.replace(enc_name, raw_name)
+                if syntax_decoded:
+                    # 💡 核心修复：按照编码后的变量名长度从大到小排序（例如先替换 v10, v11，再替换 v1）
+                    # 这样可以绝对完美避免 v10 中的 v1 被提前误伤替换掉！
+                    sorted_enc_names = sorted(final_reverse_mapping.keys(), key=lambda x: len(x), reverse=True)
+                    for enc_name in sorted_enc_names:
+                        raw_name = final_reverse_mapping[enc_name]
+                        syntax_decoded = syntax_decoded.replace(enc_name, raw_name)
+                
                 
                 df_cfa_used = df_numeric[[c for c in active_factor_items if c in df_numeric.columns]].dropna(axis=0)
                 
@@ -1741,9 +1747,6 @@ def render_stage2_cfa_clean():
 
                     # ==============================================================================
                     # 📌 变量映射：动态恢复与提取当前量表最后留下来的具体题目
-                    # ==============================================================================
-                    # ==============================================================================
-                    # 📌 变量映射映射：结合子量表名动态恢复当前量表所需变量（防止多量表覆盖）
                     # ==============================================================================
                     current_df_cfa = st.session_state.get(f"n2_cleaned_df_{sub_name}") 
                     current_estimates = est_df
