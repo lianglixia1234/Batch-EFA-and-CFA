@@ -1853,7 +1853,7 @@ def render_stage2_cfa_clean():
                                 sync_payload = {
                                     "original_measure_id": sub_name,
                                     "measure_id": sub_name,               # 默认赋予原始 ID
-                                    "kept_items": list(cfa_kept_items),    # 🔍 核心：CFA 自动删题后最终保留的题目
+                                    "kept_items": list(current_factor_items),   # 🔍 核心：CFA 自动删题后最终保留的题目
                                     "clean_item_cols": final_active_items, # 干净的列名列表
                                     "clean_df": cfa_df_final,             # 🔍 核心：CFA 纯化删题后的真实干净 DataFrame
                                     "items": list(cfa_kept_items),         # 兼容老版下载报告所需的原始键名
