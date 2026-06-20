@@ -988,7 +988,7 @@ def render_stage1_efa_clean():
 
                     # 🌟【步骤 4】：让用户点击复选框确认数据无误
                     is_confirmed = st.checkbox(
-                        f"✅ 我已确认上述表格数据，并同意将该量表缓存同步至后续的 CFA 模块", 
+                        f"✅ 我已确认上述数据，将该量表缓存同步至后续的 CFA 模块", 
                         value=is_previously_saved,
                         key=f"confirm_check_{m_name}"
                     )
@@ -1823,7 +1823,6 @@ def render_stage2_cfa_clean():
                             st.error("无法同步：当前量表的基础数据集为空，请先重新运行分析。")
                         else:
                             try:
-                                import re
                                 def _clean_col_simple(name):
                                     return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
                                 
