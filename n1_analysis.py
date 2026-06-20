@@ -1807,36 +1807,54 @@ def render_stage2_cfa_clean():
                         st.markdown("### 📥 第五部分：生成与下载报告表")
                         
                         # 1. 引导用户填写 Measure_id
-                        st.text_input(
+                        # ==========================================
+                        # 1. 引导用户填写 Measure_id 并提供确认键
+                        # ==========================================
+                        mid_input = st.text_input(
                             "量表 measure_id（唯一编码，用于所有可下载文件命名和容器锁定）",
                             value=(st.session_state.get(f"n2_measure_id_{sub_name}") or ""),
-                            key=f"n2_measure_id_{sub_name}",
+                            key=f"n2_measure_id_{sub_name}_input",  # 更换key防止冲突
                             placeholder="如 LQ、EQ 等问卷缩写",
                             help="此 measure_id 将作为最终结果表计入容器的唯一标识，同时用于下方报告文件的命名。",
                         )
                         
-                        mid = (
-                            st.session_state.get(f"n2_measure_id_{sub_name}")
-                            or ""
-                        ).strip()
-                    
-                        if not mid:
-                            st.info("💡 请在上方填写 **measure_id** 以解锁报告生成与下载功能。")
+                        # 初始化触发锁状态
+                        lock_key = f"n2_measure_id_clicked_{sub_name}"
+                        if lock_key not in st.session_state:
+                            st.session_state[lock_key] = False
+                        
+                        # 放置确认键
+                        col_btn, _ = st.columns([1, 3])
+                        with col_btn:
+                            if st.button("🔒 确认并解锁报告", key=f"n2_btn_lock_{sub_name}", use_container_width=True):
+                                if mid_input.strip():
+                                    st.session_state[lock_key] = True
+                                    st.session_state[f"n2_measure_id_{sub_name}"] = mid_input.strip()
+                                else:
+                                    st.session_state[lock_key] = False
+                                    st.warning("⚠️ measure_id 不能为空！")
+                        
+                        # 检查最终有效的 mid
+                        mid = (st.session_state.get(f"n2_measure_id_{sub_name}") or "").strip()
+                        
+                        # 判断逻辑：如果没有填，或者还没有点击过确认键，就显示提示并阻断
+                        if not mid or not st.session_state[lock_key]:
+                            st.info("💡 请在上方填写 **measure_id** 并点击 **确认并解锁报告** 键以解锁报告生成与下载功能。")
                         else:
-                            # 2. 当用户填入了 measure_id，自动在后台计算并“同时出现”预览和下载按钮，无需用户二次点击“生成”按钮
+                            # 2. 当用户填入了 measure_id 并点击了确认，自动在后台计算并“同时出现”预览和下载按钮
                             try:
                                 df_cfa = current_df_cfa.copy()
                                 factor_items = current_factor_items.copy()
                                 estimates = current_estimates.copy()
                                 stats_dict = current_fit_stats
                                 fname = current_factor_name
-                    
+                        
                                 # 列名清洗函数
                                 def _clean_col(name):
                                     return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
-                    
+                        
                                 item_clean_map = {item: _clean_col(item) for item in factor_items}
-                    
+                        
                                 def _to_num(x):
                                     try:
                                         if x is None: return np.nan
@@ -1846,12 +1864,12 @@ def render_stage2_cfa_clean():
                                         return float(x)
                                     except (TypeError, ValueError):
                                         return np.nan
-                    
+                        
                                 def _norm_key(k):
                                     return re.sub(r"[^a-z0-9]+", "", str(k).lower())
-                    
+                        
                                 _stats_norm = {_norm_key(k): v for k, v in stats_dict.items()}
-                    
+                        
                                 def _get_any(d, keys, default=np.nan):
                                     for k in keys:
                                         if k in d:
@@ -1863,7 +1881,7 @@ def render_stage2_cfa_clean():
                                             v = _to_num(_stats_norm.get(nk))
                                             if not np.isnan(v): return v
                                     return default
-                    
+                        
                                 # 潜变量方差 (主因子)
                                 trait_var = np.nan
                                 est = estimates
@@ -1871,7 +1889,7 @@ def render_stage2_cfa_clean():
                                     if row.get("op") == "~~" and row.get("LHS") == fname and row.get("RHS") == fname:
                                         trait_var = row.get("Estimate", np.nan)
                                         break
-                    
+                        
                                 # 载荷提取
                                 loadings_unstd = {}
                                 loadings_std = {}
@@ -1888,12 +1906,12 @@ def render_stage2_cfa_clean():
                                             item_key = row["LHS"]
                                             loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in est.columns else np.nan
                                             loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in est.columns else np.nan
-                    
+                        
                                 chi2_val = _get_any(stats_dict, ["chi2", "Chi2"])
                                 dof_val = _get_any(stats_dict, ["DoF", "dof", "df"])
                                 p_val = _get_any(stats_dict, ["chi2 p-value", "p-value", "pvalue", "p_value"])
                                 alpha_val = cronbach_alpha(df_cfa) if not df_cfa.empty else np.nan
-                    
+                        
                                 # Composite Reliability (CR) 计算
                                 cr_val = np.nan
                                 cr_reason = ""
@@ -1934,7 +1952,7 @@ def render_stage2_cfa_clean():
                                 except Exception as cr_e:
                                     cr_val = np.nan
                                     cr_reason = f"CR 未计算：计算过程异常（{cr_e}）。"
-                    
+                        
                                 def _extract_item_number(item_name, item_clean_name, fallback_idx):
                                     _, num_parsed, _ = parse_item_col(item_name)
                                     if num_parsed is not None: return num_parsed
@@ -1944,7 +1962,7 @@ def render_stage2_cfa_clean():
                                     m = re.search(r"(\d+)", prefix_orig)
                                     if m: return int(m.group(1))
                                     return fallback_idx
-                    
+                        
                                 sorted_items = sort_item_cols_by_number(factor_items)
                                 rows = []
                                 for idx, item in enumerate(sorted_items, start=1):
@@ -1980,52 +1998,43 @@ def render_stage2_cfa_clean():
                                         "Composite Reliability (CR)": cr_val,
                                     })
                                 sheet_items = pd.DataFrame(rows)
-                    
+                        
                                 # 核心数据完整性校验
                                 unstd_empty = ("unstandardised_loading" not in sheet_items.columns) or sheet_items["unstandardised_loading"].isna().all()
                                 std_empty = ("standardised_loading" not in sheet_items.columns) or sheet_items["standardised_loading"].isna().all()
                                 logl_empty = ("LogL" not in sheet_items.columns) or sheet_items["LogL"].isna().all()
-                    
+                        
                                 if unstd_empty and std_empty:
                                     st.error("❌ 报告生成校验未通过：未在模型输出中匹配到题目载荷，请重新确认第四部分模型运行成功。")
                                     st.stop()
-                    
+                        
                                 if logl_empty:
                                     st.caption("⚠️ 提示：LogL 字段在当前模型输出中为空，其余指标已正常导出。")
-                    
+                        
                                 # 协方差矩阵生成
                                 sorted_items_clean = [item_clean_map.get(c, c) for c in sorted_items]
                                 df_cfa_ordered = df_cfa[[c for c in sorted_items_clean if c in df_cfa.columns]]
                                 cov_matrix = df_cfa_ordered.cov()
-                    
+                        
                                 # 在内存中构建 Excel 字节流
                                 buf = io.BytesIO()
                                 with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
                                     sheet_items.to_excel(w, sheet_name="Items", index=False)
                                     cov_matrix.to_excel(w, sheet_name="Covariance", index=True)
                                 excel_bytes = buf.getvalue()
-        
+                        
                                 # 保存到 preCFA dataset
-                                # ==========================================================
                                 if "N2_preCFA" not in st.session_state:
                                     st.session_state["N2_preCFA"] = {}
                                 
                                 st.session_state["N2_preCFA"][mid] = {
                                     "measure_id": mid,
                                     "origin_sub_name": sub_name,
-                                    # purified数据
                                     "clean_df": df_cfa.copy(),
-                                    # 最终保留题目
                                     "kept_items": list(factor_items),
-                                    # 因子名
                                     "factor_name": fname,
-                                    
                                 }
-
-
-
-                                
-                    
+                        
                                 # 文件名构建
                                 cfa_type = "prelim_single_cfa" if st.session_state.get("n2_prelim_single_cfa") else "single_cfa"
                                 safe_mid = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(mid)).strip(" .") or "measure"
@@ -2033,13 +2042,10 @@ def render_stage2_cfa_clean():
                                 safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
                                 today = date.today().strftime("%Y-%m-%d")
                                 filename = f"{safe_mid}_{cfa_type}_report_{today}_{safe_user}.xlsx"
-                    
-                                # ----------------------------------------------------
-                                # 🌟 核心修改：让【下载按钮】和【数据预览】“同时出现”
-                                # ----------------------------------------------------
+                        
+                                # 展示下载按钮与数据预览
                                 st.success(f"✅ 报告数据已根据测验编码「{mid}」实时锁定并准备就绪。")
                                 
-                                # 下载按钮直接呈现在上方，极其显眼
                                 st.download_button(
                                     label="⬇️ 导出并下载最终 Excel 报告表 (已锁定至容器)",
                                     data=excel_bytes,
@@ -2047,8 +2053,7 @@ def render_stage2_cfa_clean():
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     key=f"n2_download_excel_report_direct_{sub_name}",
                                 )
-                    
-                                # 联动的多表预览
+                        
                                 st.markdown("---")
                                 st.markdown("#### 🔍 报告表实时数据预览")
                                 
@@ -2057,15 +2062,14 @@ def render_stage2_cfa_clean():
                                     st.dataframe(sheet_items.head(20), use_container_width=True)
                                 with tab2:
                                     st.dataframe(cov_matrix.head(20), use_container_width=True)
-                    
+                        
                                 if cr_reason and np.isnan(_to_num(cr_val)):
                                     st.warning(cr_reason)
-                    
+                        
                             except Exception as e:
                                 st.error(f"🚨 锁定并实时生成报告时出错: {e}")
                                 import traceback
                                 st.code(traceback.format_exc())
-
 
 
 
