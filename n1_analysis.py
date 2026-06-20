@@ -1255,8 +1255,8 @@ def render_stage2_cfa_clean():
                             else:
                                 raw_df_entity = st.session_state.get("df_source")
                         all_upstream_measures[str(m_id)] = {
-                            "items": m_config["kept_items"],          # 原始题名列表
-                            "clean_df": raw_df_entity,                # 原始数据框（可能含所有列）
+                            "items": m_config["kept_items"],
+                            "clean_df": raw_df_entity,
                             "measure_id_raw": m_id,
                             "ds_key": ds_key
                         }
@@ -1286,57 +1286,37 @@ def render_stage2_cfa_clean():
     )
 
     # ==========================================================================
-    # 3. 构建清洗列名映射（在整个函数中复用）
-    # ==========================================================================
-    # 为每个上游数据源构建清洗映射，但为了简化，我们假设所有数据来自同一数据源（或可合并）
-    # 这里我们使用第一个有效的数据框作为样例，但实际每个量表的 raw_df 可能不同，
-    # 所以我们需要在循环中为每个量表单独构建映射。
-
-    # ==========================================================================
-    # 4. 配置因子结构（每个量表一个标签页）
+    # 3. 配置因子结构（每个量表一个标签页）
     # ==========================================================================
     st.markdown("---")
     st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对与锁定")
     st.caption("请依次进入每个量表的标签页，核对或调整其因子结构配置。")
 
-    # 存储所有量表的配置（用于批量运行）
     cfa_ready_queue = {}
-
-    # 为每个选中的量表创建一个标签页
     tabs = st.tabs([f" {m_id}" for m_id in selected_measure_ids])
 
     for idx, sub_name in enumerate(selected_measure_ids):
         with tabs[idx]:
             asset = all_upstream_measures[sub_name]
-            raw_items = asset["items"]                     # 原始题名列表
-            raw_df = asset["clean_df"]                     # 原始数据框
+            raw_items = asset["items"]
+            raw_df = asset["clean_df"]
 
             # ---- 清洗列名 ----
-            # 建立原始名 -> 清洗名 映射（仅保留字母、数字、下划线，保留中文可选）
             orig_to_clean = {}
             clean_cols = []
             for col in raw_df.columns:
-                # 将非单词字符（除中文外）替换为下划线，保留中文
                 clean_col = re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(col))
-                # 如果清洗后为空，则用原列名
                 if not clean_col:
                     clean_col = str(col)
-                # 防止重复，可加后缀（这里假设列名清洗后唯一，若担心可加计数器）
                 orig_to_clean[col] = clean_col
                 clean_cols.append(clean_col)
-            # 构建清洗后的数据框
             df_clean = raw_df.copy()
             df_clean.columns = clean_cols
-
-            # 构建反向映射（清洗名 -> 原始名）
             clean_to_orig = {v: k for k, v in orig_to_clean.items()}
 
-            # 将原始题名列表转换为清洗后的题名列表
             clean_items = [orig_to_clean.get(item, item) for item in raw_items if item in orig_to_clean]
-            # 同时确保这些列在 df_clean 中存在
             clean_items = [c for c in clean_items if c in df_clean.columns]
 
-            # ---- 界面配置 ----
             st.markdown(f"####  【{sub_name}】")
             col1, col2 = st.columns(2)
             with col1:
@@ -1346,15 +1326,13 @@ def render_stage2_cfa_clean():
                     value=f"{sub_name}",
                     key=f"cfa_fname_inp_{sub_name}"
                 )
-                # 显示原始题名给用户选择（但内部存储清洗名）
                 factor_items_raw = smart_multiselect(
-                    options=raw_items,  # 显示原始名
+                    options=raw_items,
                     label=f"选择属于 {factor_name} 的题目",
                     key_suffix=f"cfa_factor_{sub_name}",
-                    default_selected=raw_items,  # 默认全选
+                    default_selected=raw_items,
                     show_selection_controls=True,
                 )
-                # 将选中的原始名转换为清洗名
                 factor_items_clean = [orig_to_clean.get(item, item) for item in factor_items_raw if item in orig_to_clean]
                 factor_items_clean = [c for c in factor_items_clean if c in df_clean.columns]
 
@@ -1365,14 +1343,10 @@ def render_stage2_cfa_clean():
                     value="Method",
                     key=f"cfa_mname_inp_{sub_name}"
                 )
-                # 方法因子的选项只能是主因子已选的清洗题目（但用户看到原始名）
-                method_options_raw = factor_items_raw  # 原始名列表
-                # 智能选择：默认选反向题（根据原始名判断）
+                method_options_raw = factor_items_raw
                 default_method_raw = [item for item in method_options_raw if _is_reverse_coded(item)]
-                # 特殊处理缓存重置
                 method_key_suffix = f"cfa_method_{sub_name}"
                 method_sig_key = f"{method_key_suffix}_options_sig"
-                # 由于选项随主因子变化，需要重置缓存
                 if st.session_state.get(method_sig_key) != tuple(method_options_raw):
                     _reset_smart_multiselect_cache(method_key_suffix)
                     st.session_state[method_sig_key] = tuple(method_options_raw)
@@ -1391,25 +1365,24 @@ def render_stage2_cfa_clean():
                     default_selected=default_method_raw,
                     show_selection_controls=True,
                 )
-                # 转换为清洗名
                 method_items_clean = [orig_to_clean.get(item, item) for item in method_items_raw if item in orig_to_clean]
                 method_items_clean = [c for c in method_items_clean if c in df_clean.columns]
 
-            # 保存配置（使用清洗名）
             cfa_ready_queue[sub_name] = {
-                "df_clean": df_clean,                      # 清洗后的全数据框
-                "clean_to_orig": clean_to_orig,            # 映射
+                "df_clean": df_clean,
+                "clean_to_orig": clean_to_orig,
                 "orig_to_clean": orig_to_clean,
                 "factor_name": factor_name,
                 "method_name": method_name if method_items_clean else None,
-                "factor_items": factor_items_clean,        # 清洗名列表
-                "method_items": method_items_clean,        # 清洗名列表
-                "raw_items": raw_items,                    # 原始名（用于显示）
+                "factor_items": factor_items_clean,
+                "method_items": method_items_clean,
+                "raw_items": raw_items,
                 "measure_id_raw": sub_name,
+                "raw_df": raw_df,  # 保存原始未清洗的数据框，用于最终锁定
             }
 
     # ==========================================================================
-    # 5. 锁定配置并批量运行按钮
+    # 4. 锁定配置并批量运行
     # ==========================================================================
     st.markdown("---")
     st.info("📌 **核对完毕后，点击下方「锁定配置并批量运行」按钮，将对所有已配置的量表执行自动删题 CFA。**")
@@ -1417,15 +1390,11 @@ def render_stage2_cfa_clean():
         st.session_state["cfa_locked_config"] = cfa_ready_queue
         st.toast("✅ 配置已锁定，开始逐个运行量表...", icon="🚀")
 
-        # 遍历所有配置，运行自动删题
         for sub_name, cfg in cfa_ready_queue.items():
-            # 如果该量表已成功运行过且用户确认过，可以跳过，但为了演示，我们每次都重新运行
-            # 但为了保留状态，我们可先清除旧结果
+            # 清除旧结果
             for key in list(st.session_state.keys()):
                 if key.startswith(f"n2_{sub_name}_"):
                     del st.session_state[key]
-
-            # 运行自动删题流程
             _run_auto_cfa_for_measure(
                 sub_name=sub_name,
                 df_clean=cfg["df_clean"],
@@ -1436,27 +1405,22 @@ def render_stage2_cfa_clean():
                 method_items=cfg["method_items"],
                 min_items_limit=min_items_limit,
             )
-
         st.success("🎉 所有量表自动删题分析完成！请在下方各个量表标签页中查看结果并确认锁定。")
 
     # ==========================================================================
-    # 6. 展示结果 & 确认锁定（每个量表独立）
+    # 5. 展示结果 & 确认锁定（每个量表独立）
     # ==========================================================================
     st.markdown("---")
     st.subheader("📊 各量表分析报告与确认")
 
     for sub_name, cfg in cfa_ready_queue.items():
-        # 检查该量表是否已有运行结果
         success_key = f"n2_{sub_name}_success"
         if not st.session_state.get(success_key, False):
-            # 未运行，显示等待状态
             with st.expander(f"⏳ {sub_name} - 等待运行", expanded=False):
                 st.info("该量表尚未运行，请点击上方「锁定配置并批量运行」按钮。")
             continue
 
-        # 已有结果，显示详细报告
         with st.expander(f"📈 {sub_name} - 分析结果", expanded=True):
-            # 读取存储的结果
             trace_logs = st.session_state.get(f"n2_{sub_name}_trace_logs", [])
             final_fit = st.session_state.get(f"n2_{sub_name}_fit_stats", {})
             final_estimates = st.session_state.get(f"n2_{sub_name}_estimates", pd.DataFrame())
@@ -1514,9 +1478,7 @@ def render_stage2_cfa_clean():
             # ---- 载荷表 ----
             st.markdown("##### 📋 最终因子载荷")
             if not final_estimates.empty:
-                # 复制并清洗列名（还原原始名）
                 est_display = final_estimates.copy()
-                # 将 LHS/RHS 中的清洗名还原为原始名（如果存在于映射中）
                 clean_to_orig = cfg["clean_to_orig"]
                 for col in ['LHS', 'RHS']:
                     if col in est_display.columns:
@@ -1534,7 +1496,9 @@ def render_stage2_cfa_clean():
                 est_display = est_display.sort_values('rank').drop(columns=['rank'])
                 display_cols = ['LHS', 'op', 'RHS', 'Estimate', 'Std.Err', 'z-value', 'P(>|z|)', 'Std.all']
                 display_cols = [c for c in display_cols if c in est_display.columns]
-                st.dataframe(est_display[display_cols].style.format("{:.3f}"))
+                # ✅ 修复：只对数值列应用格式化
+                numeric_cols = est_display[display_cols].select_dtypes(include=[np.number]).columns
+                st.dataframe(est_display[display_cols].style.format("{:.3f}", subset=numeric_cols))
             else:
                 st.warning("无载荷表输出。")
 
@@ -1542,7 +1506,7 @@ def render_stage2_cfa_clean():
             with st.expander("查看模型语法"):
                 st.code(final_syntax, language="text")
 
-            # ---- 确认锁定 & 报告导出 ----
+            # ---- 确认锁定 ----
             st.markdown("---")
             st.markdown("##### 🔒 确认锁定结果至 N2_preCFA（供后续 Final EFA 使用）")
             measure_id_input = st.text_input(
@@ -1559,47 +1523,33 @@ def render_stage2_cfa_clean():
                     if not mid:
                         st.warning("请填写 measure_id。")
                     else:
-                        # 检查是否已有结果数据
                         if final_df_cfa.empty or not final_factor_items:
                             st.error("❌ 该量表尚未成功运行，请先运行分析。")
                         else:
-                            # 存入 N2_preCFA
                             if "N2_preCFA" not in st.session_state:
                                 st.session_state["N2_preCFA"] = {}
-                            # 构建保存的数据（原始列名，即未清洗的列名）
-                            # 我们需要将 final_factor_items（清洗名）转换为原始名
                             clean_to_orig = cfg["clean_to_orig"]
                             orig_factor_items = [clean_to_orig.get(c, c) for c in final_factor_items]
-                            # 从原始数据框中提取这些列（使用原始名）
-                            # 但 final_df_cfa 是清洗后的，我们可从中还原列名
-                            # 更可靠：从原始 raw_df 中提取
-                            raw_df = cfg.get("raw_df_original") or all_upstream_measures[sub_name]["clean_df"]
-                            # 确保列存在
-                            orig_cols_present = [c for c in orig_factor_items if c in raw_df.columns]
-                            final_raw_df = raw_df[orig_cols_present].copy()
-                            # 存储
+                            # 使用原始数据框（未清洗）提取最终保留的列
+                            raw_df_orig = cfg.get("raw_df", all_upstream_measures[sub_name]["clean_df"])
+                            orig_cols_present = [c for c in orig_factor_items if c in raw_df_orig.columns]
+                            final_raw_df = raw_df_orig[orig_cols_present].copy()
                             st.session_state["N2_preCFA"][mid] = {
                                 "measure_id": mid,
                                 "origin_sub_name": sub_name,
-                                "clean_df": final_raw_df,                # 原始列名的数据框
-                                "kept_items": orig_factor_items,        # 原始题名列表
+                                "clean_df": final_raw_df,
+                                "kept_items": orig_factor_items,
                                 "factor_name": fname,
                                 "method_name": mname,
                                 "fit_stats": final_fit,
                                 "estimates": final_estimates,
                             }
                             st.success(f"✅ 量表 {mid} 已锁定至 N2_preCFA！")
-                            # 同时存储 measure_id 以便后续
                             st.session_state[f"n2_{sub_name}_measure_id"] = mid
 
-                            # ---- 生成并下载报告（可选） ----
-                            # 这里可调用生成报告函数，但为了简洁，我们仅提示已锁定
-                            # 如果需要立即下载，可加一个下载按钮（见下方）
-
-            # ---- 下载报告（如果已锁定） ----
+            # ---- 下载报告 ----
             if st.session_state.get(f"n2_{sub_name}_measure_id"):
                 if st.button("📥 下载此量表 Excel 报告", key=f"n2_{sub_name}_dl_report"):
-                    # 调用报告生成函数（复用之前的逻辑）
                     _generate_and_download_report(
                         sub_name=sub_name,
                         cfg=cfg,
@@ -1611,21 +1561,16 @@ def render_stage2_cfa_clean():
                         measure_id=st.session_state[f"n2_{sub_name}_measure_id"],
                     )
 
-    # ==========================================================================
-    # 辅助内部函数（定义在外部以便复用）
-    # ==========================================================================
+
+# =============================================================================
+# 辅助函数（内部使用）
+# =============================================================================
 
 def _run_auto_cfa_for_measure(sub_name, df_clean, clean_to_orig, factor_name, method_name,
                               factor_items, method_items, min_items_limit):
-    """
-    对单个量表执行自动删题 CFA。
-    结果存入 session_state（以 n2_{sub_name}_* 为键）。
-    """
-    # 深拷贝因子/方法题目列表，因为要修改
+    """单个量表的自动删题流程"""
     active_factor = list(factor_items)
     active_method = list(method_items) if method_items else []
-
-    # 数据提取
     all_active = list(dict.fromkeys(active_factor + active_method))
     df_sub = df_clean[all_active].dropna(axis=0, how='any').copy()
     if len(df_sub) < 10:
@@ -1636,31 +1581,29 @@ def _run_auto_cfa_for_measure(sub_name, df_clean, clean_to_orig, factor_name, me
     trace_logs = []
     current_step = 0
     max_steps = 20
-    best_global_score = -1.0
+    best_score = -1.0
     best_payload = None
 
     while current_step < max_steps:
-        current_items_count = len(active_factor)
-        if current_items_count < min_items_limit:
+        current_count = len(active_factor)
+        if current_count < min_items_limit:
             st.session_state[f"n2_{sub_name}_warning"] = f"达到最小题目限制 ({min_items_limit})，停止删题。"
             break
 
-        # 运行当前模型
         result, err, syntax = run_cfa_gui(
             df_sub, factor_name, active_factor, method_name, active_method
         )
         if err:
-            trace_logs.append({"round": current_step+1, "items": current_items_count,
+            trace_logs.append({"round": current_step+1, "items": current_count,
                                "cfi": np.nan, "tli": np.nan, "action": f"拟合出错: {err}", "deleted": "无"})
             break
 
         model_obj, estimates, fit_stats = result
-        # 提取 CFI/TLI
         cfi = _extract_fit(fit_stats, "CFI")
         tli = _extract_fit(fit_stats, "TLI")
-        current_score = cfi + tli
-        if current_score > best_global_score:
-            best_global_score = current_score
+        score = cfi + tli
+        if score > best_score:
+            best_score = score
             best_payload = {
                 "result": result,
                 "syntax": syntax,
@@ -1672,15 +1615,13 @@ def _run_auto_cfa_for_measure(sub_name, df_clean, clean_to_orig, factor_name, me
                 "fit_stats": fit_stats,
             }
 
-        # 检查是否达标
         if cfi >= 0.90 and tli >= 0.90:
-            trace_logs.append({"round": current_step+1, "items": current_items_count,
+            trace_logs.append({"round": current_step+1, "items": current_count,
                                "cfi": cfi, "tli": tli, "action": "✨ 达标！", "deleted": "无"})
-            # 保存结果并退出
-            _save_result(sub_name, best_payload, trace_logs, df_sub, active_factor, active_method)
+            _save_cfa_result(sub_name, best_payload, trace_logs, df_sub, active_factor, active_method)
             return
 
-        # 未达标：穷举试删
+        # 穷举试删
         best_del_score = -1.0
         worst_item = None
         for test_item in active_factor:
@@ -1703,28 +1644,28 @@ def _run_auto_cfa_for_measure(sub_name, df_clean, clean_to_orig, factor_name, me
                     worst_item = test_item
 
         if worst_item is None:
-            # 无有效删除项，停止
-            trace_logs.append({"round": current_step+1, "items": current_items_count,
+            trace_logs.append({"round": current_step+1, "items": current_count,
                                "cfi": cfi, "tli": tli, "action": "⚠️ 无法找到可删除的题目", "deleted": "无"})
             break
 
-        # 执行删除
         active_factor.remove(worst_item)
         if worst_item in active_method:
             active_method.remove(worst_item)
-        trace_logs.append({"round": current_step+1, "items": current_items_count,
+        trace_logs.append({"round": current_step+1, "items": current_count,
                            "cfi": cfi, "tli": tli, "action": f"❌ 删除题目", "deleted": worst_item})
         current_step += 1
 
-    # 循环结束，使用最佳历史结果
+    # 循环结束，使用最佳历史
     if best_payload:
-        _save_result(sub_name, best_payload, trace_logs, df_sub, best_payload["factor_items"], best_payload["method_items"])
+        _save_cfa_result(sub_name, best_payload, trace_logs, df_sub,
+                         best_payload["factor_items"], best_payload["method_items"])
     else:
         st.session_state[f"n2_{sub_name}_success"] = False
         st.session_state[f"n2_{sub_name}_error"] = "未获得有效模型。"
 
-def _save_result(sub_name, payload, trace_logs, df_sub, factor_items, method_items):
-    """保存结果到 session_state"""
+
+def _save_cfa_result(sub_name, payload, trace_logs, df_sub, factor_items, method_items):
+    """保存单个量表的CFA结果到session_state"""
     st.session_state[f"n2_{sub_name}_success"] = True
     st.session_state[f"n2_{sub_name}_estimates"] = payload["estimates"]
     st.session_state[f"n2_{sub_name}_fit_stats"] = payload["fit_stats"]
@@ -1734,8 +1675,9 @@ def _save_result(sub_name, payload, trace_logs, df_sub, factor_items, method_ite
     st.session_state[f"n2_{sub_name}_method_items"] = method_items
     st.session_state[f"n2_{sub_name}_df_cfa"] = df_sub[list(dict.fromkeys(factor_items + method_items))].dropna(axis=0, how='any')
 
+
 def _extract_fit(fit_stats, key):
-    """从 fit_stats（dict 或 DataFrame）中提取指标"""
+    """从fit_stats中提取指标值（兼容dict和DataFrame）"""
     if isinstance(fit_stats, dict):
         return fit_stats.get(key, np.nan)
     elif isinstance(fit_stats, pd.DataFrame):
@@ -1750,23 +1692,15 @@ def _extract_fit(fit_stats, key):
                         pass
     return np.nan
 
+
 def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_items, final_estimates, final_fit, fname, measure_id):
-    """生成 Excel 报告并下载（与手动模式一致）"""
+    """生成Excel报告并触发下载"""
     try:
         df_cfa = final_df_cfa.copy()
         factor_items = final_factor_items
         estimates = final_estimates
         stats_dict = final_fit
-        fname = fname
         clean_to_orig = cfg["clean_to_orig"]
-
-        # 列名清洗函数（与手动模式一致）
-        def _clean_col(name):
-            return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
-
-        # 建立原始列名到清洗后列名的映射（因为 estimates 中的 RHS 是清洗后的列名）
-        # 但这里我们直接使用清洗名作为键，因为 final_factor_items 已经是清洗名
-        item_clean_map = {item: item for item in factor_items}  # 清洗名不变
 
         def _to_num(x):
             try:
@@ -1799,7 +1733,6 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 loadings_unstd[item_key] = _to_num(row.get("Estimate", np.nan))
                 loadings_std[item_key] = _to_num(row.get("Std.all", np.nan))
 
-        # 获取拟合指标
         def _get_any(d, keys, default=np.nan):
             for k in keys:
                 if k in d:
@@ -1813,7 +1746,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         p_val = _get_any(stats_dict, ["chi2 p-value", "p-value", "pvalue", "p_value"])
         alpha_val = cronbach_alpha(df_cfa) if not df_cfa.empty else np.nan
 
-        # 构建题目明细表（使用原始名显示）
+        # 构建题目明细表（显示原始名）
         sorted_items = sort_item_cols_by_number(factor_items)
         rows = []
         for idx, item_clean in enumerate(sorted_items, start=1):
@@ -1849,22 +1782,18 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             })
         sheet_items = pd.DataFrame(rows)
 
-        # 校验载荷列
         if sheet_items["unstandardised_loading"].isna().all() and sheet_items["standardised_loading"].isna().all():
             st.error("❌ 报告生成失败：未提取到任何载荷，请检查模型是否包含载荷行。")
             return
 
-        # 协方差矩阵（使用清洗名）
         cov_matrix = df_cfa[factor_items].cov()
 
-        # 写入Excel
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
             sheet_items.to_excel(w, sheet_name="Items", index=False)
             cov_matrix.to_excel(w, sheet_name="Covariance", index=True)
         buf.seek(0)
 
-        # 下载
         today = date.today().strftime("%Y-%m-%d")
         safe_mid = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(measure_id)).strip(" .") or "measure"
         user_name = st.session_state.get("user_name", "unknown_user")
@@ -1882,7 +1811,6 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         st.error(f"生成报告时出错: {e}")
         import traceback
         st.code(traceback.format_exc())
-        
     
     
 
