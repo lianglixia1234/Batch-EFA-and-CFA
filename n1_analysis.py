@@ -1808,40 +1808,57 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 trait_var = np.nan
             
             # 2. 准备针对题目的前缀数字提取函数（处理类似 1_xxx, 01_xxx 的情况）
+            # =============================================================================
+            # 🚀 极致纯粹版：全通配前缀数字精准匹配 (题目、方差双向通杀)
+            # =============================================================================
+            
+            # 1. 统一前缀数字提取函数（例如 1_xxx 或 01_xxx 都能提取出 1）
             def get_prefix_num(item_str):
                 if not isinstance(item_str, str):
                     return None
-                match = re.match(r'^.*?(\d+)', item_str) # 提取字符串中出现的第一个连续数字
+                match = re.match(r'^.*?(\d+)', item_str)
                 return int(match.group(1)) if match else None
             
-            # 获取当前题目 item_raw 的数字前缀
+            # 获取当前循环中这道题目的前缀数字
             current_item_num = get_prefix_num(item_raw)
             
-            # 3. 动态过滤出当前题目的载荷行
-            # 条件：RHS 是因子名，且 LHS 的数字前缀与当前题目一致
-            item_loading_row = pd.DataFrame()
+            # 2. 清洗 estimates 数据，去掉任何可能干扰的隐藏空格
+            estimates_clean = final_estimates.copy()
+            for col in ['LHS', 'op', 'RHS']:
+                if col in estimates_clean.columns:
+                    estimates_clean[col] = estimates_clean[col].astype(str).str.strip()
+            
+            # 3. 提取潜变量方差 (variance_latent)
+            # 只要 op 是 '~~' 且两边都不是纯数字题目的那一行，就是潜变量（因子）自己的方差
+            trait_var = np.nan
+            for _, row in estimates_clean[estimates_clean['op'] == "~~"].iterrows():
+                # 潜变量通常没有题目的数字前缀，或者其名字等于 sub_name/fname
+                if get_prefix_num(row['LHS']) is None or row['LHS'] in [sub_name, fname]:
+                    trait_var = _to_num(row.get('Estimate', np.nan))
+                    break
+            
+            # 4. 提取当前题目的非标准化与标准化载荷 (无论在LHS还是RHS，只要数字前缀对上就捞)
+            unstd_load = np.nan
+            std_load = np.nan
             
             if current_item_num is not None:
-                # 过滤出 RHS 匹配因子的所有行
-                rhs_matched = final_estimates[
-                    (final_estimates['RHS'] == sub_name) | (final_estimates['RHS'] == sub_name_clean)
-                ]
+                # 筛选出属于载荷的操作符行（=~ 或 ~）
+                loading_rows = estimates_clean[estimates_clean['op'].isin(["=~", "~"])]
                 
-                # 在这些行中，通过 LHS 的数字前缀精准匹配题目
-                for idx, row in rhs_matched.iterrows():
-                    lhs_val = str(row['LHS'])
-                    if get_prefix_num(lhs_val) == current_item_num:
-                        item_loading_row = pd.DataFrame([row])
+                for _, row in loading_rows.iterrows():
+                    lhs_num = get_prefix_num(row['LHS'])
+                    rhs_num = get_prefix_num(row['RHS'])
+                    
+                    # 核心逻辑：只要这一行的 LHS 或者 RHS 的前缀数字等同于当前题目的数字，即命中！
+                    if lhs_num == current_item_num or rhs_num == current_item_num:
+                        unstd_load = _to_num(row.get('Estimate', np.nan))
+                        # 兼容读取 Std.all 或 Std. All
+                        std_load = _to_num(row.get('Std.all', row.get('Std. All', np.nan)))
                         break
-            
-            # 4. 提取非标准化和标准化载荷
-            if not item_loading_row.empty:
-                unstd_load = item_loading_row.iloc[0].get('Estimate', np.nan)
-                # 有些版本的 semopy 标准化载荷列名叫 'Std. All' 或 'Std.all' 或 'est_std'
-                std_load = item_loading_row.iloc[0].get('Std.all', item_loading_row.iloc[0].get('Std. All', np.nan))
-            else:
-                unstd_load = np.nan
-                std_load = np.nan
+
+# =============================================================================
+# 填充到您的 rows.append 结构中
+# =============================================================================
             
             # =============================================================================
             # 填充到您的 rows.append 结构中
