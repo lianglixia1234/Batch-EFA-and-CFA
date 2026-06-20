@@ -1483,6 +1483,8 @@ def render_stage2_cfa_clean():
                 for col in ['LHS', 'RHS']:
                     if col in est_display.columns:
                         est_display[col] = est_display[col].apply(lambda x: clean_to_orig.get(x, x))
+             
+        
                 # 排序...
                 # 转换数值类型...
                 numeric_cols = est_display[display_cols].select_dtypes(include=[np.number]).columns
