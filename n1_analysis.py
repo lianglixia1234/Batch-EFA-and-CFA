@@ -1830,7 +1830,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         safe_mid = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(measure_id)).strip(" .") or "measure"
         user_name = st.session_state.get("user_name", "unknown_user")
         safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
-        filename = f"{safe_mid}_cfa_report_{today}_{safe_user}.xlsx"
+        filename = f"{safe_mid}_cfa_report_{today}.xlsx"
         st.download_button(
             label="⬇️ 点击下载 Excel 报告",
             data=buf.getvalue(),
