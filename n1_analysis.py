@@ -1806,9 +1806,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 trait_var = latent_var_row.iloc[0].get('Estimate', np.nan)
             else:
                 trait_var = np.nan
-            
-            # 2. 准备针对题目的前缀数字提取函数（处理类似 1_xxx, 01_xxx 的情况）
-            # =============================================================================
+  
 
 
             
@@ -1838,19 +1836,32 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             # =============================================================================
             trait_var = np.nan
             
-            if m_name:
-                # 统一转换成干净的小写字符串
-                target_mname = str(m_name).strip().lower()
-                
-                # 遍历所有方差行 (op == '~~')
-                for _, row in estimates_clean[estimates_clean['op'] == "~~"].iterrows():
-                    l_text = str(row['LHS']).strip().lower()
-                    r_text = str(row['RHS']).strip().lower()
-                    
-                    # 严格条件：LHS 和 RHS 必须相等，且必须等同于量表名 m_name
-                    if l_text == r_text and l_text == target_mname:
-                        trait_var = _to_num(row.get('Estimate', np.nan))
-                        break
+            # =============================================================================
+            # 🎯 纯粹按两端都等于 sub_name / sub_name_clean 的逻辑提取方差
+            # =============================================================================
+            
+            # 1. 提取可能的目标名字并去除隐蔽空格
+            sub_name_str = str(sub_name).strip()
+            sub_name_clean = str(cfg.get("sub_name_clean", sub_name)).strip()
+            
+            # 2. 局部去空格清洗（只在变量匹配时用，确保完全相等不被空格背刺）
+            estimates_temp = final_estimates.copy()
+            for col in ['LHS', 'op', 'RHS']:
+                if col in estimates_temp.columns:
+                    estimates_temp[col] = estimates_temp[col].astype(str).str.strip()
+            
+            # 3. 严格执行双向等于因子名的判断 (op 为 '~~' 代表方差)
+            latent_var_row = estimates_temp[
+                (estimates_temp['op'] == "~~") & 
+                (estimates_temp['LHS'].isin([sub_name_str, sub_name_clean])) & 
+                (estimates_temp['RHS'].isin([sub_name_str, sub_name_clean]))
+            ]
+            
+            if not latent_var_row.empty:
+                # 提取 Estimate 转换并赋值
+                trait_var = _to_num(latent_var_row.iloc[0].get('Estimate', np.nan))
+            else:
+                trait_var = np.nan
             
             # 如果上面那种极度严格的办法还是没抓到，启动排除法兜底
             if np.isnan(trait_var):
