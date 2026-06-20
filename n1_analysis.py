@@ -1002,8 +1002,8 @@ def render_stage1_efa_clean():
                         
                         # 🔒【超级核心修改】：对内永远且必须使用 real_measure_id（最开始创建的ID）作为 Key
                         st.session_state.N1_preEFA[ds_name_extracted][real_measure_id] = {
-                            "kept_items": list(kept),      # N1 过滤后确认保留的题目
-                            "n_factors": int(n_factors),   # N1 模型推荐提取的因子数
+                            "kept_items": list(kept),      # 过滤后确认保留的题目
+                            "n_factors": int(n_factors),   # 模型推荐提取的因子数
                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                             "clean_df": df_final          # 清洗删题后的真实 DataFrame
                         }
@@ -1791,7 +1791,9 @@ def render_stage2_cfa_clean():
                         current_factor_items = list(current_df_cfa.columns)
     
                  
-                    # --- 5. 模块：量表数据确认与报告导出 ---
+                 
+                    # ==============================================================================
+                    # # --- 5. 模块：量表数据确认与报告导出 ---
                     # ==============================================================================
                     st.markdown("---")
                     st.markdown(f"### 【{sub_name}】数据确认与报告导出")
@@ -1799,12 +1801,23 @@ def render_stage2_cfa_clean():
                     # 初始化全局同步容器（确保后续 CFA、不删题 EFA 都能安全读取）
                     if "preCFA_SubDataset" not in st.session_state:
                         st.session_state.preCFA_SubDataset = {}
+
+                    # --------------------------------------------------------------------------
+                    # 🧩【局部适配层】：提取第 4 部分自动删题 CFA 跑完的最终真实成果
+                    # --------------------------------------------------------------------------
+                    # 如果第四部分标记了运行成功，优先获取 CFA 纯化删题后的保留题目和真实干净 DataFrame
+                    # 若无，则向下兼容防御兜底
+                    cfa_success_flag = st.session_state.get(f"n2_success_{sub_name}", False)
+                    
+                    # 💡 请在此处将右侧变量替换为您第 4 部分最终生成的 [留选题项列表] 和 [最终DataFrame]
+                    cfa_kept_items = locals().get("kept_items", locals().get("current_factor_items", []))
+                    cfa_df_final = locals().get("df_final", locals().get("current_df_cfa", None))
                     
                     # --------------------------------------------------------------------------
-                    # 🔒 步骤一：数据源同步确认
+                    # 🔒 步骤一：数据源同步确认（将 CFA 最终删题成果同步至 preCFA 容器）
                     # --------------------------------------------------------------------------
                     st.markdown("#### 🔒 步骤一：数据源同步确认")
-                    st.caption("请先确认当前量表清洗后的数据结构，将其锁定同步至全局数据容器。")
+                    st.caption("请先确认当前量表经 CFA 自动删题纯化后的最终数据结构，将其锁定同步至全局数据容器。")
                     
                     init_sync_key = f"SYNC_{sub_name}"
                     # 检查是否此前已经锁定过数据
@@ -1812,47 +1825,51 @@ def render_stage2_cfa_clean():
                     
                     if is_synced_to_container:
                         saved_data = st.session_state.preCFA_SubDataset[init_sync_key]
-                        st.success(f"✅ 核心数据已成功锁定存入容器！最终保留题量：{len(saved_data['items'])} 题，有效样本：{len(saved_data['df'])} 行。")
+                        st.success(f"✅ CFA 纯化成果已锁定存入容器！最终保留题量：{len(saved_data['kept_items'])} 题，有效样本：{len(saved_data['clean_df'])} 行。")
                     else:
-                        st.info("💡 当前量表的基础数据尚未同步，请点击下方按钮进行数据锁定。")
-                        if current_df_cfa is None:
-                            st.error(f"❌ 错误：未找到量表【{sub_name}】的有效基础数据集！请确认上游 CFA 算法是否成功运行。")
+                        st.info("💡 当前量表的 CFA 最终纯化成果尚未同步，请点击下方按钮进行数据锁定。")
+                        if cfa_df_final is None:
+                            st.error(f"❌ 错误：未找到量表【{sub_name}】的有效 CFA 成果数据集！请确认第四部分自动删题算法是否成功运行。")
                     
-                    # 同步锁定按钮
-                    if st.button(f"🤝 锁定并同步【{sub_name}】基础数据", key=f"n2_btn_confirm_{sub_name}"):
-                        if current_df_cfa is None or current_df_cfa.empty:
-                            st.error("无法同步：当前量表的基础数据集为空，请先重新运行分析。")
+                    # 同步锁定按钮：将最终删题结果反向写入 preCFA 容器
+                    if st.button(f"🤝 锁定并同步【{sub_name}】CFA 纯化成果", key=f"n2_btn_confirm_{sub_name}"):
+                        if cfa_df_final is None or cfa_df_final.empty:
+                            st.error("无法同步：当前量表的最终数据集为空，请先重新运行第四部分 CFA 分析。")
+                        elif not cfa_kept_items:
+                            st.error("无法同步：CFA 筛选后的保留题项（kept_items）为空，请检查模型删题策略。")
                         else:
                             try:
                                 import re  # 防御性局部导入
                                 def _clean_col_simple(name):
                                     return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
                                 
+                                # 使用 CFA 最终删题后的 cfa_kept_items 清洗列名
                                 final_active_items = [
-                                    _clean_col_simple(item) for item in current_factor_items 
-                                    if _clean_col_simple(item) in current_df_cfa.columns
+                                    _clean_col_simple(item) for item in cfa_kept_items 
+                                    if _clean_col_simple(item) in cfa_df_final.columns
                                 ]
                                 
-                                # 🚀【超级核心修改】：遵循 EFA 闭环规范，使用【原始 ID】sub_name 对内闭环存储
-                                # 包含后续“最终不删题 EFA”和“CFA”联动所需的全部核心字段
+                                # 🚀【严格参考 EFA 闭环规范】：完美装配包含 kept_items 和 clean_df 的核心 Payload
                                 sync_payload = {
                                     "original_measure_id": sub_name,
-                                    "measure_id": sub_name,                # 默认赋予原始 ID
-                                    "items": list(current_factor_items),   # 原始题目列表
+                                    "measure_id": sub_name,               # 默认赋予原始 ID
+                                    "kept_items": list(cfa_kept_items),    # 🔍 核心：CFA 自动删题后最终保留的题目
                                     "clean_item_cols": final_active_items, # 干净的列名列表
-                                    "df": current_df_cfa[final_active_items].copy(), # 清洗删题后的真实 DataFrame
+                                    "clean_df": cfa_df_final,             # 🔍 核心：CFA 纯化删题后的真实干净 DataFrame
+                                    "items": list(cfa_kept_items),         # 兼容老版下载报告所需的原始键名
+                                    "df": cfa_df_final[final_active_items].copy(), # 兼容老版下载报告所需的过滤 DataFrame
                                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                                 }
                                 
-                                # 双向同步：既存入临时同步键，也直接通过原始 ID 存入容器根节点
+                                # 双向多键名无缝同步：既存入当前卡片临时同步键，也直接通过原始 ID 存入全局容器，确保第3板块 finalEFA 稳固读取
                                 st.session_state.preCFA_SubDataset[init_sync_key] = sync_payload
                                 st.session_state.preCFA_SubDataset[sub_name] = sync_payload
                                 
-                                st.toast(f"🟢 量表【{sub_name}】基础数据锁定成功！")
-                                st.success("🚀 基础数据锁定成功！下方已解锁报告导出面板。")
+                                st.toast(f"🟢 量表【{sub_name}】CFA 最终成果锁定成功！")
+                                st.success("🚀 纯化成果锁定成功！后续【最终不删题 EFA】模块已成功对接。下方已解锁报告导出面板。")
                                 st.rerun()
                             except Exception as ex:
-                                st.error(f"同步数据时发生错误: {ex}")
+                                st.error(f"同步数据至 preCFA 容器时发生错误: {ex}")
                     
                     # --------------------------------------------------------------------------
                     # 📥 步骤二：解锁指定唯一编码并生成下载报告 (只有步骤一成功后才可见/可操作)
@@ -1885,19 +1902,20 @@ def render_stage2_cfa_clean():
                             if not mid_input:
                                 st.error("❌ 唯一编码 measure_id 不能为空，请输入后再生成报告。")
                             else:
-                                with st.spinner("正在基于锁定数据生成实时信效度报表..."):
+                                with st.spinner("正在基于锁定的 CFA 纯化成果生成实时信效度报表..."):
                                     try:
-                                        import re  # 💡 修复报错的核心：在这里再次显式导入 re，防止闭包作用域丢失
+                                        import re  # 显式导入，防御 Streamlit 闭包丢失
                                         
-                                        # 提取刚刚锁定的干净数据
+                                        # 提取刚刚锁定的、包含最终 CFA 删题成果的容器数据
                                         sync_data = st.session_state.preCFA_SubDataset[init_sync_key]
                                         df_cfa = sync_data["df"]
-                                        factor_items = sync_data["items"]
+                                        factor_items = sync_data["kept_items"] # 💡 关键修复：使用 CFA 筛选后的 kept_items 计算
+                                        
                                         estimates = current_estimates
                                         stats_dict = current_fit_stats
                                         fname = current_factor_name
                     
-                                        # 🚀【联动增强】：当用户自定义了唯一编码时，同时用新编码复制一份存入容器
+                                        # 🚀【唯一编码同步联动】：当用户自定义了唯一编码时，在全局容器中以新编码复制一份，确保下游模块不管是认原始ID还是自定义ID都能找到
                                         user_custom_payload = sync_data.copy()
                                         user_custom_payload["measure_id"] = mid_input
                                         st.session_state.preCFA_SubDataset[mid_input] = user_custom_payload
@@ -2092,7 +2110,7 @@ def render_stage2_cfa_clean():
                             st.warning(st.session_state[cr_warning_key])
                         
                         if st.session_state.get(report_bytes_key):
-                            st.markdown("##### 📥 报告 file下载")
+                            st.markdown("##### 📥 报告文件下载")
                             st.download_button(
                                 label=f"⬇️ 立即下载【{mid_input}】Excel 报告表",
                                 data=st.session_state[report_bytes_key],
@@ -2102,7 +2120,7 @@ def render_stage2_cfa_clean():
                             )
                     else:
                         err_reason = st.session_state.get(f"n2_err_msg_{sub_name}", "尚未点击全局大按钮运行分析")
-                        st.info(f"💡 量表【{sub_name}】目前暂无有效模型成果。原因：{err_reason}")    
+                        st.info(f"💡 量表【{sub_name}】目前暂无有效模型成果。原因：{err_reason}")
     else:
         st.warning("⚠️ 暂无有效的量表可进行报告查看。")
         
