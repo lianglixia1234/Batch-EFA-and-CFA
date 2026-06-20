@@ -1790,16 +1790,16 @@ def render_stage2_cfa_clean():
                     if not current_factor_items and current_df_cfa is not None:
                         current_factor_items = list(current_df_cfa.columns)
     
-                    # ==============================================================================
+                 
                     # --- 5. 模块：量表数据确认与报告导出 ---
                     # ==============================================================================
                     st.markdown("---")
                     st.markdown(f"### 【{sub_name}】数据确认与报告导出")
                     
-                    # 初始化全局同步容器
+                    # 初始化全局同步容器（确保后续 CFA、不删题 EFA 都能安全读取）
                     if "preCFA_SubDataset" not in st.session_state:
                         st.session_state.preCFA_SubDataset = {}
-    
+                    
                     # --------------------------------------------------------------------------
                     # 🔒 步骤一：数据源同步确认
                     # --------------------------------------------------------------------------
@@ -1807,8 +1807,9 @@ def render_stage2_cfa_clean():
                     st.caption("请先确认当前量表清洗后的数据结构，将其锁定同步至全局数据容器。")
                     
                     init_sync_key = f"SYNC_{sub_name}"
+                    # 检查是否此前已经锁定过数据
                     is_synced_to_container = st.session_state.preCFA_SubDataset.get(init_sync_key) is not None
-    
+                    
                     if is_synced_to_container:
                         saved_data = st.session_state.preCFA_SubDataset[init_sync_key]
                         st.success(f"✅ 核心数据已成功锁定存入容器！最终保留题量：{len(saved_data['items'])} 题，有效样本：{len(saved_data['df'])} 行。")
@@ -1816,13 +1817,14 @@ def render_stage2_cfa_clean():
                         st.info("💡 当前量表的基础数据尚未同步，请点击下方按钮进行数据锁定。")
                         if current_df_cfa is None:
                             st.error(f"❌ 错误：未找到量表【{sub_name}】的有效基础数据集！请确认上游 CFA 算法是否成功运行。")
-    
+                    
                     # 同步锁定按钮
                     if st.button(f"🤝 锁定并同步【{sub_name}】基础数据", key=f"n2_btn_confirm_{sub_name}"):
                         if current_df_cfa is None or current_df_cfa.empty:
                             st.error("无法同步：当前量表的基础数据集为空，请先重新运行分析。")
                         else:
                             try:
+                                import re  # 防御性局部导入
                                 def _clean_col_simple(name):
                                     return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
                                 
@@ -1831,18 +1833,27 @@ def render_stage2_cfa_clean():
                                     if _clean_col_simple(item) in current_df_cfa.columns
                                 ]
                                 
-                                # 将动态恢复出来的数据存入容器
-                                st.session_state.preCFA_SubDataset[init_sync_key] = {
+                                # 🚀【超级核心修改】：遵循 EFA 闭环规范，使用【原始 ID】sub_name 对内闭环存储
+                                # 包含后续“最终不删题 EFA”和“CFA”联动所需的全部核心字段
+                                sync_payload = {
                                     "original_measure_id": sub_name,
-                                    "items": current_factor_items,       
-                                    "clean_item_cols": final_active_items, 
-                                    "df": current_df_cfa[final_active_items].copy()                  
+                                    "measure_id": sub_name,                # 默认赋予原始 ID
+                                    "items": list(current_factor_items),   # 原始题目列表
+                                    "clean_item_cols": final_active_items, # 干净的列名列表
+                                    "df": current_df_cfa[final_active_items].copy(), # 清洗删题后的真实 DataFrame
+                                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                                 }
+                                
+                                # 双向同步：既存入临时同步键，也直接通过原始 ID 存入容器根节点
+                                st.session_state.preCFA_SubDataset[init_sync_key] = sync_payload
+                                st.session_state.preCFA_SubDataset[sub_name] = sync_payload
+                                
+                                st.toast(f"🟢 量表【{sub_name}】基础数据锁定成功！")
                                 st.success("🚀 基础数据锁定成功！下方已解锁报告导出面板。")
                                 st.rerun()
                             except Exception as ex:
                                 st.error(f"同步数据时发生错误: {ex}")
-    
+                    
                     # --------------------------------------------------------------------------
                     # 📥 步骤二：解锁指定唯一编码并生成下载报告 (只有步骤一成功后才可见/可操作)
                     # --------------------------------------------------------------------------
@@ -1857,8 +1868,8 @@ def render_stage2_cfa_clean():
                         cov_preview_key = f"n2_preview_cov_{sub_name}"
                         cr_warning_key = f"n2_cr_warn_{sub_name}"
                         mid_value_key = f"n2_mid_val_{sub_name}"
-    
-                        # 让用户输入最终的 measure_id 唯一编码
+                    
+                        # 让用户输入最终的 measure_id 唯一编码（如 LQ, EQ）
                         mid_input = st.text_input(
                             f"量表【{sub_name}】的唯一编码 measure_id",
                             value=st.session_state.get(mid_value_key, str(sub_name)),
@@ -1866,16 +1877,18 @@ def render_stage2_cfa_clean():
                             placeholder="如 LQ、EQ 等问卷缩写",
                             help="该编码将作为此量表在后续‘最终得分计算’中的唯一 Key。"
                         ).strip()
-    
+                    
                         # 保存输入的 measure_id 状态
                         st.session_state[mid_value_key] = mid_input
-    
+                    
                         if st.button("⚡ 生成并下载 Excel 报告", key=f"n2_btn_gen_report_{sub_name}"):
                             if not mid_input:
                                 st.error("❌ 唯一编码 measure_id 不能为空，请输入后再生成报告。")
                             else:
                                 with st.spinner("正在基于锁定数据生成实时信效度报表..."):
                                     try:
+                                        import re  # 💡 修复报错的核心：在这里再次显式导入 re，防止闭包作用域丢失
+                                        
                                         # 提取刚刚锁定的干净数据
                                         sync_data = st.session_state.preCFA_SubDataset[init_sync_key]
                                         df_cfa = sync_data["df"]
@@ -1883,19 +1896,20 @@ def render_stage2_cfa_clean():
                                         estimates = current_estimates
                                         stats_dict = current_fit_stats
                                         fname = current_factor_name
-    
-                                        # 将数据推入最终指定的 measure_id 全局映射中
-                                        st.session_state.preCFA_SubDataset[mid_input] = sync_data
-                                        st.session_state.preCFA_SubDataset[mid_input]["measure_id"] = mid_input
-    
+                    
+                                        # 🚀【联动增强】：当用户自定义了唯一编码时，同时用新编码复制一份存入容器
+                                        user_custom_payload = sync_data.copy()
+                                        user_custom_payload["measure_id"] = mid_input
+                                        st.session_state.preCFA_SubDataset[mid_input] = user_custom_payload
+                    
                                         # --------------------------------------------------------------
-                                        # 🧮 以下执行你原本完整的 Excel 组装与信效度计算逻辑
+                                        # 🧮 以下执行原有的 Excel 组装与信效度计算逻辑
                                         # --------------------------------------------------------------
                                         def _clean_col(name):
                                             return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
-    
+                    
                                         item_clean_map = {item: _clean_col(item) for item in factor_items}
-    
+                    
                                         def _to_num(x):
                                             try:
                                                 if x is None: return np.nan
@@ -1904,12 +1918,12 @@ def render_stage2_cfa_clean():
                                                     if x in ("", "-", "nan", "NaN", "None"): return np.nan
                                                 return float(x)
                                             except (TypeError, ValueError): return np.nan
-    
+                    
                                         def _norm_key(k):
                                             return re.sub(r"[^a-z0-9]+", "", str(k).lower())
-    
+                    
                                         _stats_norm = {_norm_key(k): v for k, v in stats_dict.items()}
-    
+                    
                                         def _get_any(d, keys, default=np.nan):
                                             for k in keys:
                                                 if k in d:
@@ -1921,13 +1935,13 @@ def render_stage2_cfa_clean():
                                                     v = _to_num(_stats_norm.get(nk))
                                                     if not np.isnan(v): return v
                                             return default
-    
+                    
                                         trait_var = np.nan
                                         for _, row in estimates.iterrows():
                                             if row.get("op") == "~~" and row.get("LHS") == fname and row.get("RHS") == fname:
                                                 trait_var = row.get("Estimate", np.nan)
                                                 break
-    
+                    
                                         loadings_unstd = {}
                                         loadings_std = {}
                                         if "LHS" in estimates.columns and "op" in estimates.columns and "RHS" in estimates.columns:
@@ -1943,12 +1957,12 @@ def render_stage2_cfa_clean():
                                                     item_key = row["LHS"]
                                                     loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in estimates.columns else np.nan
                                                     loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in estimates.columns else np.nan
-    
+                    
                                         chi2_val = _get_any(stats_dict, ["chi2", "Chi2"])
                                         dof_val = _get_any(stats_dict, ["DoF", "dof", "df"])
                                         p_val = _get_any(stats_dict, ["chi2 p-value", "p-value", "pvalue", "p_value"])
                                         alpha_val = cronbach_alpha(df_cfa) if not df_cfa.empty else np.nan
-    
+                    
                                         cr_val = np.nan
                                         cr_reason = ""
                                         try:
@@ -1984,7 +1998,7 @@ def render_stage2_cfa_clean():
                                                             cr_reason = "CR 未计算：分母无效。"
                                         except Exception as cr_e:
                                             cr_reason = f"CR 计算异常: {cr_e}"
-    
+                    
                                         def _extract_item_number(item_name, item_clean_name, fallback_idx):
                                             _, num_parsed, _ = parse_item_col(item_name)
                                             if num_parsed is not None: return num_parsed
@@ -1992,7 +2006,7 @@ def render_stage2_cfa_clean():
                                             m = re.search(r"(\d+)", prefix_orig)
                                             if m: return int(m.group(1))
                                             return fallback_idx
-    
+                    
                                         sorted_items = sort_item_cols_by_number(factor_items)
                                         rows = []
                                         for idx, item in enumerate(sorted_items, start=1):
@@ -2028,25 +2042,23 @@ def render_stage2_cfa_clean():
                                                 "Composite Reliability (CR)": cr_val,
                                             })
                                         sheet_items = pd.DataFrame(rows)
-    
-                                        # 核心载荷空值阻断校验
+                    
                                         unstd_empty = ("unstandardised_loading" not in sheet_items.columns) or sheet_items["unstandardised_loading"].isna().all()
                                         std_empty = ("standardised_loading" not in sheet_items.columns) or sheet_items["standardised_loading"].isna().all()
                                         if unstd_empty and std_empty:
                                             st.error("生成前校验失败：模型估计因子载荷读取全为空。请重新运行上游CFA模型。")
                                             st.stop()
-    
+                    
                                         sorted_items_clean = [item_clean_map.get(c, c) for c in sorted_items]
                                         df_cfa_ordered = df_cfa[[c for c in sorted_items_clean if c in df_cfa.columns]]
                                         cov_matrix = df_cfa_ordered.cov()
-    
+                    
                                         buf = io.BytesIO()
                                         with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
                                             sheet_items.to_excel(w, sheet_name="Items", index=False)
                                             cov_matrix.to_excel(w, sheet_name="Covariance", index=True)
                                         buf.seek(0)
-    
-                                        # 🟢 缓存写入当前量表专属持久化字典中，从根本上防止覆盖和刷新丢失
+                    
                                         st.session_state[report_bytes_key] = buf.getvalue()
                                         cfa_type = "prelim_single_cfa" if st.session_state.get("n2_prelim_single_cfa") else "single_cfa"
                                         safe_mid = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(mid_input)).strip(" .") or "measure"
@@ -2058,11 +2070,12 @@ def render_stage2_cfa_clean():
                                         st.session_state[cov_preview_key] = cov_matrix.copy()
                                         st.session_state[cr_warning_key] = cr_reason if (np.isnan(_to_num(cr_val)) and cr_reason) else ""
                                         
+                                        st.toast("🎉 报表生成成功！")
                                         st.success("🎉 报告数据生成成功！可以在下方预览并点击下载。")
-                                        st.rerun() # 触发一次轻量重新渲染，立刻点亮下方预览与下载组件
+                                        st.rerun()
                                     except Exception as e:
                                         st.error(f"生成报告时出错: {e}")
-    
+                    
                         # --------------------------------------------------------------------------
                         # 🟢 稳定呈现层：基于各自专属 Key 渲染，保证预览与下载组件永不闪退
                         # --------------------------------------------------------------------------
@@ -2079,7 +2092,7 @@ def render_stage2_cfa_clean():
                             st.warning(st.session_state[cr_warning_key])
                         
                         if st.session_state.get(report_bytes_key):
-                            st.markdown("##### 📥 报告文件下载")
+                            st.markdown("##### 📥 报告 file下载")
                             st.download_button(
                                 label=f"⬇️ 立即下载【{mid_input}】Excel 报告表",
                                 data=st.session_state[report_bytes_key],
@@ -2087,9 +2100,9 @@ def render_stage2_cfa_clean():
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key=f"n2_download_btn_trigger_{sub_name}",
                             )
-                else:
-                    err_reason = st.session_state.get(f"n2_err_msg_{sub_name}", "尚未点击全局大按钮运行分析")
-                    st.info(f"💡 量表【{sub_name}】目前暂无有效模型成果。原因：{err_reason}")
+                    else:
+                        err_reason = st.session_state.get(f"n2_err_msg_{sub_name}", "尚未点击全局大按钮运行分析")
+                        st.info(f"💡 量表【{sub_name}】目前暂无有效模型成果。原因：{err_reason}")    
     else:
         st.warning("⚠️ 暂无有效的量表可进行报告查看。")
         
