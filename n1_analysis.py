@@ -1785,14 +1785,77 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             _, num, text = parse_item_col(item_raw)
             rev = 1 if _is_reverse_coded(item_raw) else 0
             item_number = num if num is not None else idx
+
+
+            # =============================================================================
+            # 🚀 优化后的载荷与方差动态提取逻辑
+            # =============================================================================
+            
+            # 1. 提取潜在变量方差 (variance_latent)
+            # 条件：LHS == sub_name 且 RHS == sub_name
+            # 注：有时候 semopy 内部名字也是清洗过的，我们同时用原始名和清洗名做兼容匹配
+            sub_name_clean = cfg.get("sub_name_clean", sub_name) 
+            
+            latent_var_row = final_estimates[
+                ((final_estimates['LHS'] == sub_name) | (final_estimates['LHS'] == sub_name_clean)) & 
+                ((final_estimates['RHS'] == sub_name) | (final_estimates['RHS'] == sub_name_clean))
+            ]
+            
+            if not latent_var_row.empty:
+                # 优先取 'Estimate' 列作为方差
+                trait_var = latent_var_row.iloc[0].get('Estimate', np.nan)
+            else:
+                trait_var = np.nan
+            
+            # 2. 准备针对题目的前缀数字提取函数（处理类似 1_xxx, 01_xxx 的情况）
+            def get_prefix_num(item_str):
+                if not isinstance(item_str, str):
+                    return None
+                match = re.match(r'^.*?(\d+)', item_str) # 提取字符串中出现的第一个连续数字
+                return int(match.group(1)) if match else None
+            
+            # 获取当前题目 item_raw 的数字前缀
+            current_item_num = get_prefix_num(item_raw)
+            
+            # 3. 动态过滤出当前题目的载荷行
+            # 条件：RHS 是因子名，且 LHS 的数字前缀与当前题目一致
+            item_loading_row = pd.DataFrame()
+            
+            if current_item_num is not None:
+                # 过滤出 RHS 匹配因子的所有行
+                rhs_matched = final_estimates[
+                    (final_estimates['RHS'] == sub_name) | (final_estimates['RHS'] == sub_name_clean)
+                ]
+                
+                # 在这些行中，通过 LHS 的数字前缀精准匹配题目
+                for idx, row in rhs_matched.iterrows():
+                    lhs_val = str(row['LHS'])
+                    if get_prefix_num(lhs_val) == current_item_num:
+                        item_loading_row = pd.DataFrame([row])
+                        break
+            
+            # 4. 提取非标准化和标准化载荷
+            if not item_loading_row.empty:
+                unstd_load = item_loading_row.iloc[0].get('Estimate', np.nan)
+                # 有些版本的 semopy 标准化载荷列名叫 'Std. All' 或 'Std.all' 或 'est_std'
+                std_load = item_loading_row.iloc[0].get('Std.all', item_loading_row.iloc[0].get('Std. All', np.nan))
+            else:
+                unstd_load = np.nan
+                std_load = np.nan
+            
+            # =============================================================================
+            # 填充到您的 rows.append 结构中
+            # =============================================================================
             rows.append({
                 "measure_id": measure_id,
                 "item_number": item_number,
                 "item_text": text or item_raw,
                 "reverse": rev,
-                "variance_latent": trait_var,
-                "unstandardised_loading": loadings_unstd.get(item_clean, np.nan),
-                "standardised_loading": loadings_std.get(item_clean, np.nan),
+                "variance_latent": trait_var, # ✨ 已成功获取
+                
+                "unstandardised_loading": unstd_load, # ✨ 精准匹配获取
+                "standardised_loading": std_load,     # ✨ 精准匹配获取
+                
                 "chi2_user_model": chi2_val,
                 "df_user_model": dof_val,
                 "p_value_user_model": p_val,
@@ -1811,6 +1874,8 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 "item_sd": df_cfa[item_clean].std() if item_clean in df_cfa.columns else np.nan,
                 "cronbach_alpha": alpha_val,
             })
+            
+            
         sheet_items = pd.DataFrame(rows)
        
 
