@@ -1809,8 +1809,8 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             
             # 2. 准备针对题目的前缀数字提取函数（处理类似 1_xxx, 01_xxx 的情况）
             # =============================================================================
-            # 🚀 极致纯粹版：全通配前缀数字精准匹配 (题目、方差双向通杀)
-            # =============================================================================
+
+
             
             # 1. 统一前缀数字提取函数（例如 1_xxx 或 01_xxx 都能提取出 1）
             def get_prefix_num(item_str):
@@ -1828,16 +1828,28 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 if col in estimates_clean.columns:
                     estimates_clean[col] = estimates_clean[col].astype(str).str.strip()
             
-            # 3. 提取潜变量方差 (variance_latent)
-            # 只要 op 是 '~~' 且两边都不是纯数字题目的那一行，就是潜变量（因子）自己的方差
+            # 3. 🎯 严格提取潜变量方差 (variance_latent)
+            # 条件：op 是 '~~'，LHS == RHS，且排除题目（有数字前缀）和 Method 因子
             trait_var = np.nan
-            for _, row in estimates_clean[estimates_clean['op'] == "~~"].iterrows():
-                # 潜变量通常没有题目的数字前缀，或者其名字等于 sub_name/fname
-                if get_prefix_num(row['LHS']) is None or row['LHS'] in [sub_name, fname]:
-                    trait_var = _to_num(row.get('Estimate', np.nan))
-                    break
+            mname_clean = str(mname).strip().lower() if mname else ""
             
-            # 4. 提取当前题目的非标准化与标准化载荷 (无论在LHS还是RHS，只要数字前缀对上就捞)
+            for _, row in estimates_clean[estimates_clean['op'] == "~~"].iterrows():
+                l_val = row['LHS']
+                r_val = row['RHS']
+                
+                # 条件甲：LHS 和 RHS 必须完全相同
+                if l_val == r_val:
+                    # 条件乙：不能是题目（即不能带有数字前缀）
+                    if get_prefix_num(l_val) is None:
+                        # 条件丙：不能是 Method 效应因子
+                        if mname_clean and (mname_clean in l_val.lower()):
+                            continue # 跳过 Method 因子行
+                            
+                        # 此时剩下的就是真正的主成分潜变量方差了！
+                        trait_var = _to_num(row.get('Estimate', np.nan))
+                        break
+            
+            # 4. 提取当前题目的非标准化与标准化载荷
             unstd_load = np.nan
             std_load = np.nan
             
@@ -1852,17 +1864,9 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                     # 核心逻辑：只要这一行的 LHS 或者 RHS 的前缀数字等同于当前题目的数字，即命中！
                     if lhs_num == current_item_num or rhs_num == current_item_num:
                         unstd_load = _to_num(row.get('Estimate', np.nan))
-                        # 兼容读取 Std.all 或 Std. All
                         std_load = _to_num(row.get('Std.all', row.get('Std. All', np.nan)))
                         break
-
-# =============================================================================
-# 填充到您的 rows.append 结构中
-# =============================================================================
-            
-            # =============================================================================
-            # 填充到您的 rows.append 结构中
-            # =============================================================================
+ 
             rows.append({
                 "measure_id": measure_id,
                 "item_number": item_number,
