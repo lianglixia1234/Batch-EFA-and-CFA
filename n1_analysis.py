@@ -2019,8 +2019,7 @@ def render_stage2_cfa_clean():
                                     "kept_items": list(factor_items),
                                     # 因子名
                                     "factor_name": fname,
-                                        ""
-                                    )
+                                    
                                 }
 
 
