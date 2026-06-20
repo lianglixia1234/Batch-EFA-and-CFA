@@ -1478,6 +1478,13 @@ def render_stage2_cfa_clean():
             # ---- 载荷表 ----
             st.markdown("##### 📋 最终因子载荷")
             if not final_estimates.empty:
+                # 强制转换数值列为 float（非数值转为 NaN）
+                numeric_cols_to_fix = ['Estimate', 'Std.Err', 'z-value', 'P(>|z|)', 'Std.all']
+                for col in numeric_cols_to_fix:
+                    if col in est_display.columns:
+                        est_display[col] = pd.to_numeric(est_display[col], errors='coerce')
+                
+                
                 est_display = final_estimates.copy()
                 clean_to_orig = cfg["clean_to_orig"]
                 for col in ['LHS', 'RHS']:
