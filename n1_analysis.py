@@ -1889,23 +1889,67 @@ def render_stage2_cfa_clean():
                                     if row.get("op") == "~~" and row.get("LHS") == fname and row.get("RHS") == fname:
                                         trait_var = row.get("Estimate", np.nan)
                                         break
-                        
+
+
+                                
+                                
                                 # 载荷提取
+                                
+                                # ==========================================
+                                # 🧬 【强健修复版】载荷智能提取与映射还原
+                                # ==========================================
                                 loadings_unstd = {}
                                 loadings_std = {}
-                                if "LHS" in est.columns and "op" in est.columns and "RHS" in est.columns:
-                                    trait_loadings = est[(est["op"] == "=~") & (est["LHS"] == fname)]
-                                    if not trait_loadings.empty:
-                                        for _, row in trait_loadings.iterrows():
-                                            item_key = row["RHS"]
-                                            loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in est.columns else np.nan
-                                            loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in est.columns else np.nan
-                                    else:
-                                        trait_loadings = est[(est["op"] == "~") & (est["RHS"] == fname)]
-                                        for _, row in trait_loadings.iterrows():
-                                            item_key = row["LHS"]
-                                            loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in est.columns else np.nan
-                                            loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in est.columns else np.nan
+                                
+                                if est is not None and not est.empty:
+                                    # 1. 临时将列名统一转大写，并去除内容空格，防止大小写错位
+                                    est_patched = est.copy()
+                                    est_patched.columns = [str(c).upper() for c in est_patched.columns]
+                                    
+                                    if "LHS" in est_patched.columns and "OP" in est_patched.columns and "RHS" in est_patched.columns:
+                                        fname_str = str(fname).strip().upper()
+                                        
+                                        # 2. 预先建立当前子量表的反向映射词典（从 v1 还原回原题目名）
+                                        # 对应第 3 部分产生的 final_reverse_mapping，如果内存里有直接拿，没有则实时根据 factor_items 逆向生成
+                                        current_rev_map = final_reverse_mapping if ('final_reverse_mapping' in locals() and final_reverse_mapping) else {}
+                                        if not current_rev_map:
+                                            unique_all_items_tmp = list(dict.fromkeys(factor_items + (method_items if 'method_items' in locals() else [])))
+                                            current_rev_map = {f"v{idx + 1}": item for idx, item in enumerate(unique_all_items_tmp)}
+                                        
+                                        # 3. 筛选主因子的载荷行 (包含 =~ 关系)
+                                        trait_loadings = est_patched[
+                                            (est_patched["OP"].astype(str).str.strip() == "=~") & 
+                                            (est_patched["LHS"].astype(str).str.strip().str.upper() == fname_str)
+                                        ]
+                                        
+                                        # 兜底：如果没找到 =~ 关系，尝试寻找 ~ 回归关系
+                                        if trait_loadings.empty:
+                                            trait_loadings = est_patched[
+                                                (est_patched["OP"].astype(str).str.strip() == "~") & 
+                                                (est_patched["RHS"].astype(str).str.strip().str.upper() == fname_str)
+                                            ]
+                                            is_regression_mode = True
+                                        else:
+                                            is_regression_mode = False
+                                            
+                                        # 4. 循环解析并还原题目真实名称
+                                        if not trait_loadings.empty:
+                                            for _, row in trait_loadings.iterrows():
+                                                # 根据模型关系确定题目所在的列
+                                                raw_item_code = row["RHS"] if not is_regression_mode else row["LHS"]
+                                                raw_item_code_str = str(raw_item_code).strip()
+                                                
+                                                # ⭐【核心修复点】还原映射：将 "v1" 转换为清洗前的原始题目名（如 "Q1_xxx"）
+                                                actual_item_name = current_rev_map.get(raw_item_code_str, raw_item_code_str)
+                                                # 再通过您在 341 行定义的 _clean_col 转换为 item_clean 形式，确保跟后续第 391 行完美契合
+                                                item_key = _clean_col(actual_item_name)
+                                                
+                                                # 兼容不同底层库可能输出的 Estimate 和 Std.all 列名变体
+                                                est_val = row.get("ESTIMATE", row.get("EST", np.nan))
+                                                std_val = row.get("STD.ALL", row.get("STD_ALL", row.get("STANDARDIZED", np.nan)))
+                                                
+                                                loadings_unstd[item_key] = _to_num(est_val)
+                                                loadings_std[item_key] = _to_num(std_val)
                         
                                 chi2_val = _get_any(stats_dict, ["chi2", "Chi2"])
                                 dof_val = _get_any(stats_dict, ["DoF", "dof", "df"])
