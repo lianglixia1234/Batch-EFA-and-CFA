@@ -1805,7 +1805,7 @@ def render_n2_analysis():
 
     # 板块一：single factor CFA
     with tab_single_cfa:
-       render_single_cfa_clean()
+       # render_single_cfa_clean()
 
     # 板块二：multi factor CFA
     # with tab_multi_cfa:
