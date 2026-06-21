@@ -1787,3 +1787,28 @@ def render_n2_analysis():
                                 st.success(msg)
                             else:
                                 st.error(f"保存失败: {msg}")
+
+
+
+
+# ==============================================================================
+# 🌟 顶层三大板块隔离调度中心
+# ==============================================================================
+def render_n2_analysis():
+    st.title("模块 2: N2数据分析")
+
+    # 使用 st.tabs 将三大核心分析板块在水平方向彻底隔离
+    tab_single_cfa, tab_multi_cfa = st.tabs([
+        "1. 自动删题 single factor CFA 板块", 
+        "2. 自动删题 multi factor CFA 板块", 
+        "3. 最终不删题 EFA 板块"
+    ])
+
+    # 板块一：single factor CFA
+    # with tab_single_cfa:
+    #    render_single_cfa_clean()
+
+    # 板块二：multi factor CFA
+    # with tab_multi_cfa:
+    #    render_multi_cfa_clean()
+
