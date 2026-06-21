@@ -1017,7 +1017,7 @@ def render_stage1_efa_clean():
                         
                         today_str = date.today().strftime("%Y-%m-%d")
                         safe_measure_id = "".join(c for c in final_measure_id if c not in '[]:*?/\\ ')
-                        file_filename = f"EFA_Report_{safe_measure_id}_{today_str}.xlsx"  # 文件名享受个性化长改名
+                        file_filename = f"{safe_measure_id}_preEFA_report_{today_str}.xlsx"  # 文件名享受个性化长改名
                         
                         st.download_button(
                             label=f"⬇️ 立即下载 【{final_measure_id}】 维度的独立 Excel 报告",
@@ -1049,6 +1049,11 @@ def render_stage1_efa_clean():
                         st.markdown(
                             f" * 🟢:**`{sub_m}`** ── 保留题目: `{len(config['kept_items'])}` 题 "
                         )
+
+
+
+
+
 
 # CFA 核心算法区域
 # ==============================================================================
@@ -1962,7 +1967,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         safe_mid = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(measure_id)).strip(" .") or "measure"
         user_name = st.session_state.get("user_name", "unknown_user")
         safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
-        filename = f"{safe_mid}_cfa_report_{today}.xlsx"
+        filename = f"{safe_mid}_precfa_report_{today}.xlsx"
         st.download_button(
             label="⬇️ 点击下载 Excel 报告",
             data=buf.getvalue(),
@@ -2188,15 +2193,22 @@ def render_stage3_efa_no_deletion():
                     key=f"stage3_input_show_id_{cfa_key}"
                 )
 
+   
+                         
+                
                 try:
                     # 指标计算生成大表 (这里简写主要逻辑，保证编译不报错)
                     k_all, k_mod = calculate_kmo(df_final)
                     chi_v, p_v = calculate_bartlett_sphericity(df_final)
+                    alpha_rem_df = alpha_after_removal(df_final)
+                    alpha_lookup = alpha_rem_df.set_index("删除的题项")["Cronbach's α"]
                     itc_df = calculate_item_total_correlation(df_final)
                     communalities = (loadings ** 2).sum(axis=1)
+                    _, _, s_stat, s_p = check_residual_normality(df_final, loadings)
                     
                     sorted_items = sort_item_cols_by_number(kept)
                     rows = []
+                    
                     
                     for item in sorted_items:
                         pre, num, text = parse_item_col(item)
@@ -2204,20 +2216,33 @@ def render_stage3_efa_no_deletion():
                         rev = 1 if (isinstance(item, str) and item.rstrip().endswith("r")) else 0
                         load_row = loadings.loc[item] if item in loadings.index else pd.Series(dtype=float)
                         
+                        prefix = str(item_txt).strip().split("_", 1)[0]
+                        m_match = re.search(r"(\d+)", prefix)
+                        item_num = int(m_match.group(1)) if m_match else ""
+                        
                         row = {
                             "measure_id": final_measure_id, 
                             "item_text": item_txt,
-                            "reverse": rev,
-                            "KMO": k_mod,
-                            "Bartlett_chi2": chi_v,
-                            "Bartlett_p": p_v,
-                            "item_total_correlation": itc_df.loc[item, "Item-Total Corr"] if item in itc_df.index else np.nan,
-                            "communality": communalities.get(item, np.nan)
+                            "reverse": rev
                         }
                         for c in loadings.columns:
                             row[c] = load_row.get(c, np.nan)
+                        row["KMO"] = k_mod
+                        row["Bartlett_chi2"] = chi_v
+                        row["Bartlett_p"] = p_v
+                        row["alpha_after_removal"] = alpha_lookup.get(item, np.nan)
+                        row["item_total_correlation"] = itc_df.loc[item, "Item-Total Corr"] if item in itc_df.index else np.nan
+                        row["communality"] = communalities.get(item, np.nan)
+                        row["residual_Shapiro_W_stat"] = s_stat
+                        row["residual_Shapiro_W_p"] = s_p
+                
                         rows.append(row)
-                        
+
+                       
+
+
+
+                    
                     single_measure_df = pd.DataFrame(rows)
                     st.dataframe(single_measure_df, use_container_width=True)
 
@@ -2253,7 +2278,7 @@ def render_stage3_efa_no_deletion():
                         st.download_button(
                             label=f"⬇️ 下载 【{final_measure_id}】 维度的终期验证 Excel 报告",
                             data=single_buf.getvalue(),
-                            file_name=f"Final_EFA_Report_{safe_measure_id}_{today_str}.xlsx",
+                            file_name=f"{safe_measure_id}_finalEFA_report_{today_str}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             key=f"stage3_dl_btn_{cfa_key}"
                         )
