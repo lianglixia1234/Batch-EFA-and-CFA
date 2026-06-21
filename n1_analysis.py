@@ -1995,7 +1995,7 @@ def render_stage3_efa_no_deletion():
     cfa_asset = st.session_state.get("N1_postCFA")
     
     if not cfa_asset:
-        st.info("💡 暂未检测到第二部分 CFA（N1_postCFA）留存的题目结果。请确保在“自动删题 CFA 板块”中完成了分析、勾选了确认并保存。")
+        st.info("💡 暂未检测到第二部分 CFA。请确保在“自动删题 CFA 板块”中完成了分析、勾选了确认并保存。")
         return
 
     all_cfa_measures = {}
@@ -2025,7 +2025,7 @@ def render_stage3_efa_no_deletion():
     st.markdown("---")
     st.markdown("### 🔍 第一步：勾选您本次需要执行终期 EFA 验证的量表")
     selected_cfa_keys = st.multiselect(
-        "📂 请选择要拉入终期不删题 EFA 分析流的 CFA 量表（默认全选）：",
+        "📂 请选择要进行不删题 EFA 分析的量表：",
         options=list(all_cfa_measures.keys()),
         default=list(all_cfa_measures.keys()),
         key="stage3_multiselect_cfa_keys"
@@ -2067,7 +2067,7 @@ def render_stage3_efa_no_deletion():
     # ==========================================================================
     # 4. 执行批量全自动管道循环 (不删题验证版)
     # ==========================================================================
-    if st.button("🚀 开始运行选定 CFA 量表的自动化终期不删题 EFA", type="primary", use_container_width=True):
+    if st.button("🚀 开始运行选定 CFA 量表的不删题 EFA", type="primary", use_container_width=True):
         batch_results = {}
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -2106,7 +2106,7 @@ def render_stage3_efa_no_deletion():
             
             progress_bar.progress((idx + 1) / len(final_analysis_queue))
             
-        status_text.success("🎉 所有选定 CFA 量表的终期不删题 EFA 验证分析全部完成！请在下方审阅结果。")
+        status_text.success("🎉 EFA 分析全部完成！请在下方审阅结果。")
         st.session_state.batch_n1_no_del_results = batch_results
 
     # ==========================================================================
@@ -2114,7 +2114,7 @@ def render_stage3_efa_no_deletion():
     # ==========================================================================
     if st.session_state.batch_n1_no_del_results:
         st.markdown("---")
-        st.subheader("📥 最终验证结果审查与导出")
+        st.subheader("📥 最终结果审查与导出")
 
         active_keys = list(st.session_state.batch_n1_no_del_results.keys())
         tabs = st.tabs(active_keys)
@@ -2165,8 +2165,20 @@ def render_stage3_efa_no_deletion():
                 # 5.3 载荷矩阵
                 st.markdown("#### 3️⃣ 最终因子载荷矩阵 (Factor Loadings)")
                 loadings_sorted = sort_dataframe_by_item_names(loadings)
-                st.dataframe(loadings_sorted.style.format("{:.3f}"))
 
+
+                def color_loadings(val):
+                    try:
+                        is_strong = abs(float(val)) > 0.40
+                    except (TypeError, ValueError):
+                        return ''
+                    color = 'blue' if is_strong else 'black'
+                    weight = 'bold' if is_strong else 'normal'
+                    return f'color: {color}; font-weight: {weight}'
+
+                st.dataframe(loadings_sorted.style.format("{:.3f}").map(color_loadings))
+
+                
                 # 5.4 终期改名与保存归档
                 st.markdown("#### 4️⃣ 独立导出与确认")
                 
