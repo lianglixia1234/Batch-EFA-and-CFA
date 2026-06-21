@@ -2035,6 +2035,7 @@ def render_stage3_efa_no_deletion():
         default=list(all_cfa_measures.keys()),
         key="stage3_multiselect_cfa_keys"
     )
+
     
     if not selected_cfa_keys:
         st.warning("⚠️ 请至少勾选一个量表以继续分析。")
