@@ -1800,8 +1800,7 @@ def render_n2_analysis():
     # 使用 st.tabs 将三大核心分析板块在水平方向彻底隔离
     tab_single_cfa, tab_multi_cfa = st.tabs([
         "1. 自动删题 single factor CFA 板块", 
-        "2. 自动删题 multi factor CFA 板块", 
-        "3. 最终不删题 EFA 板块"
+        "2. 自动删题 multi factor CFA 板块"
     ])
 
     # 板块一：single factor CFA
