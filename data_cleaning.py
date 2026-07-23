@@ -2184,7 +2184,7 @@ def render_data_cleaning():
         # 第九步 创建复杂问卷 Measure Group
         # ==========================================
 
-        st.subheader("9. 构建复杂问卷 Measure Group（仅 EFA 数据可忽视该步骤）")
+        st.subheader("9. 构建复杂问卷 Measure Group")
 
         st.info(
             "在这里，你可以将多个 Measure（第8步创建的子数据集）组合成一个 "
@@ -2207,6 +2207,21 @@ def render_data_cleaning():
             st.session_state.sub_datasets.keys()
         )
 
+        # 新增：修改已选标签字体颜色
+        st.markdown("""
+        <style>
+        [data-baseweb="tag"]{
+            color:red !important;
+            font-weight:600 !important;
+        }
+        
+        [data-baseweb="tag"] span{
+            color:red !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        
         if "measure_group_selection" not in st.session_state:
             st.session_state.measure_group_selection = []
 
