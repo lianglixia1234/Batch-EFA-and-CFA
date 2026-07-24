@@ -1714,6 +1714,7 @@ def _extract_fit(fit_stats, key):
     return np.nan
 
 
+# 📂📂📂📂📂
 def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_items, final_estimates, final_fit, fname, measure_id):
     """生成Excel报告并触发下载"""
     try:
@@ -1976,6 +1977,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             file_name=filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"n2_{sub_name}_dl_excel",
+            on_click="ignore",
         )
         st.success("报告已生成！")
     except Exception as e:
