@@ -2391,7 +2391,7 @@ def render_data_cleaning():
                 on_click=go_to_n1  # <--- 关键在这里
             )
 
-             st.button(
+            st.button(
                 "前往 N2 模块进行分析 ->", 
                 type="primary", 
                 use_container_width=True,
