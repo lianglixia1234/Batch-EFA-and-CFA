@@ -1007,7 +1007,6 @@ def render_stage1_efa_clean():
                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                             "clean_df": df_final          # 清洗删题后的真实 DataFrame
                         }
-                        st.toast(f"🟢 【{real_measure_id}】")
 
                         # 2. 编译并输出 Excel 下载组件
                         single_buf = io.BytesIO()
@@ -1393,7 +1392,6 @@ def render_stage2_cfa_clean():
     st.info("📌 **核对完毕后，点击下方「锁定配置并批量运行」按钮，将对所有已配置的量表执行自动删题 CFA。**")
     if st.button("🔒 锁定配置并批量运行所有量表", type="primary", use_container_width=True):
         st.session_state["cfa_locked_config"] = cfa_ready_queue
-        st.toast("✅ 配置已锁定，开始逐个运行量表...", icon="🚀")
 
         for sub_name, cfg in cfa_ready_queue.items():
             # 清除旧结果
@@ -1571,7 +1569,6 @@ def render_stage2_cfa_clean():
             
                             st.success(f"✅ 量表 {mid} 已锁定！已按原始键名【{sub_name}】同步至下游。")
                             st.session_state[f"n2_{sub_name}_measure_id"] = mid
-                            st.toast(f"🟢 CFA 最终资产已就绪: {sub_name}")
 
             # ---- 下载报告 ----
             if st.session_state.get(f"n2_{sub_name}_measure_id"):
@@ -2265,7 +2262,6 @@ def render_stage3_efa_no_deletion():
                             "measure_id": final_measure_id,
                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                         }
-                        st.toast(f"🟢 终期验证结果已锁定: 【{cfa_key}】")
 
                         # 导出 Excel 
                         single_buf = io.BytesIO()
@@ -2319,9 +2315,9 @@ def render_n1_analysis():
 
     # 使用 st.tabs 将三大核心分析板块在水平方向彻底隔离
     tab_efa_clean, tab_cfa_clean, tab_efa_final = st.tabs([
-        "1. 自动删题 EFA 板块", 
-        "2. 自动删题 CFA 板块", 
-        "3. 最终不删题 EFA 板块"
+        "1. 自动删题 EFA", 
+        "2. 自动删题 CFA", 
+        "3. 最终不删题 EFA"
     ])
 
     # 板块一：直接渲染原逻辑改名后的核心 EFA
