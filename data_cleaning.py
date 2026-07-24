@@ -2400,6 +2400,7 @@ def render_data_cleaning():
         
         with col2:
             st.caption("点击此按钮将直接携带当前保存的子数据集，跳转至N1 分析页面。")
+            
             st.caption("点击此按钮将直接携带当前保存的子数据集，跳转至N2 分析页面。")
 
         st.markdown("---")
