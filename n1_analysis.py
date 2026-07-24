@@ -1523,7 +1523,7 @@ def render_stage2_cfa_clean():
             )
             col_btn, _ = st.columns([1, 3])
             with col_btn:
-                if st.button("✅ 确认并锁定此量表", key=f"n2_{sub_name}_lock_btn", use_container_width=True):
+                if st.button("✅ 确认结果", key=f"n2_{sub_name}_lock_btn", use_container_width=True):
                     mid = measure_id_input.strip()
                     if not mid:
                         st.warning("请填写 measure_id。")
@@ -1567,7 +1567,7 @@ def render_stage2_cfa_clean():
                                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                             }
             
-                            st.success(f"✅ 量表 {mid} 已锁定！已按原始键名【{sub_name}】同步至下游。")
+                            st.success(f"✅ 量表 {mid} 已锁定！已按【{sub_name}】同步至下游。")
                             st.session_state[f"n2_{sub_name}_measure_id"] = mid
 
             # ---- 下载报告 ----
@@ -1914,11 +1914,18 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
 
 
 # =============================================================================
- 
+            m = re.match(r'^(\d+)_(.*)$', item_raw)
+            
+            if m:
+                item_number = int(m.group(1))   # 提取前面的数字
+                item_text = m.group(2).strip()  # 去掉数字和下划线后的文本
+            else:
+                item_text = text or item_raw    # 没有前缀则保持原样
+
             rows.append({
                 "measure_id":  mid,
                 "item_number": item_number,
-                "item_text": text or item_raw,
+                "item_text": item_text,
                 "reverse": rev,
                 "variance_latent": trait_var, # ✨ 已成功获取
                 
