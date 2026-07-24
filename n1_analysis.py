@@ -924,7 +924,7 @@ def render_stage1_efa_clean():
                 # 🌟【步骤 1】：先询问用户最终结果的 measure_id 是什么（允许用户交互修改）
                 # 注意：此处的 final_measure_id 仅用于渲染表格第一列与 Excel 文件重命名，不污染底层 Key
                 final_measure_id = st.text_input(
-                    f"✍️ 请确认或修改量表【{real_measure_id}】最终用于【报告导出】的展示名称:",
+                    f"✍️ 量表 measure_id（唯一编码）:",
                     value=real_measure_id,
                     key=f"input_measure_id_{m_name}"
                 )
@@ -988,7 +988,7 @@ def render_stage1_efa_clean():
 
                     # 🌟【步骤 4】：让用户点击复选框确认数据无误
                     is_confirmed = st.checkbox(
-                        f"✅ 我已确认上述数据，将该量表缓存同步至后续的 CFA 模块", 
+                        f"✅ 确认上述数据", 
                         value=is_previously_saved,
                         key=f"confirm_check_{m_name}"
                     )
