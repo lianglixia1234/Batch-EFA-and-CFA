@@ -2379,7 +2379,10 @@ def render_data_cleaning():
             # 1. 定义一个回调函数，专门用来改状态
             def go_to_n1():
                 st.session_state.page = "N1分析"
-            
+
+            def go_to_n2_():
+                st.session_state.page = "N2分析"
+                
             # 2. 在按钮里使用 on_click 参数调用这个函数
             st.button(
                 "前往 N1 模块进行分析 ->", 
@@ -2387,9 +2390,16 @@ def render_data_cleaning():
                 use_container_width=True,
                 on_click=go_to_n1  # <--- 关键在这里
             )
+
+             st.button(
+                "前往 N2 模块进行分析 ->", 
+                type="primary", 
+                use_container_width=True,
+                on_click=go_to_n2_  # <--- 关键在这里
+            )
         
         with col2:
-            st.caption("点击此按钮将直接携带当前保存的子数据集，跳转至 N1 分析页面。")
+            st.caption("点击此按钮将直接携带当前保存的子数据集，跳转至分析页面。")
 
         st.markdown("---")
 
