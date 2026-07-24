@@ -664,9 +664,11 @@ def _render_dual_mode_cleaning():
                 )
 
     st.markdown("---")
-    def _go_n1():
-        st.session_state.nav_selection = "2. N1 EFA数据分析"
-    st.button("前往 N1 模块进行分析 ->", type="primary", use_container_width=True, on_click=_go_n1)
+
+    
+    def go_to_n2():
+        st.session_state.page = "N2分析"
+    st.button("前往 N2 模块进行分析 ->", type="primary", use_container_width=True, on_click=go_to_n2)
 
 
 @st.fragment
