@@ -1567,7 +1567,6 @@ def render_stage2_cfa_clean():
                                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                             }
             
-                            st.success(f"✅ 量表 {mid} 已锁定！已按【{sub_name}】同步至下游。")
                             st.session_state[f"n2_{sub_name}_measure_id"] = mid
 
             # ---- 下载报告 ----
