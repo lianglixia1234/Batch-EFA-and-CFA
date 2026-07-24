@@ -10,8 +10,8 @@ from scipy.stats import chi2
 from typing import Any, Tuple
 
 # 导入通用工具函数
-from utils import smart_multiselect, parse_item_col, sort_item_cols_by_number
-from n1_analysis import cronbach_alpha
+from .utils import smart_multiselect, parse_item_col, sort_item_cols_by_number
+from .n1_analysis import cronbach_alpha
 
 try:
     from db_save import save_formula_params, save_score_records, build_formula_params_json
@@ -196,7 +196,7 @@ def run_cfa_gui(df, factor_name, factor_items, method_name, method_items):
 # 页面渲染逻辑
 # ==============================================================================
 
-def render_single_cfa_clean():
+def render_n2_analysis():
     st.title("模块 3: Single-Factor CFA")
 
     # --- 1. 数据来源 ---
@@ -1787,27 +1787,3 @@ def render_single_cfa_clean():
                                 st.success(msg)
                             else:
                                 st.error(f"保存失败: {msg}")
-
-
-
-
-# ==============================================================================
-# 🌟 顶层三大板块隔离调度中心
-# ==============================================================================
-def render_n2_analysis():
-    st.title("模块 2: N2数据分析")
-
-    # 使用 st.tabs 将三大核心分析板块在水平方向彻底隔离
-    tab_single_cfa, tab_multi_cfa = st.tabs([
-        "1. 自动删题 single factor CFA 板块", 
-        "2. 自动删题 multi factor CFA 板块"
-    ])
-
-    # 板块一：single factor CFA
-    #with tab_single_cfa:
-       # render_single_cfa_clean()
-
-    # 板块二：multi factor CFA
-    # with tab_multi_cfa:
-    #    render_multi_cfa_clean()
-
