@@ -958,7 +958,7 @@ def render_stage1_efa_clean():
                         row = {
                             "measure_id": final_measure_id,   # 🌟【纯展示层】：仅在表格内呈现用户自定义的名称
                             "item_number": item_num,
-                            "item_text": item_txt,
+                            "item_text": re.sub(r'^\d+_', '', item_txt),
                             "reverse": rev,
                         }
                         for c in loadings.columns:
