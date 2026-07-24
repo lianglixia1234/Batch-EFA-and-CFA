@@ -1568,19 +1568,18 @@ def render_stage2_cfa_clean():
             
                             st.session_state[f"n2_{sub_name}_measure_id"] = mid
 
-            # ---- 下载报告 ----
-            if st.session_state.get(f"n2_{sub_name}_measure_id"):
-                if st.button("📥 下载此量表 Excel 报告", key=f"n2_{sub_name}_dl_report"):
-                    _generate_and_download_report(
-                        sub_name=sub_name,
-                        cfg=cfg,
-                        final_df_cfa=final_df_cfa,
-                        final_factor_items=final_factor_items,
-                        final_estimates=final_estimates,
-                        final_fit=final_fit,
-                        fname=fname,
-                        measure_id=st.session_state[f"n2_{sub_name}_measure_id"],
-                    )
+                            # ---- 下载报告 ----
+                    
+                            _generate_and_download_report(
+                                sub_name=sub_name,
+                                cfg=cfg,
+                                final_df_cfa=final_df_cfa,
+                                final_factor_items=final_factor_items,
+                                final_estimates=final_estimates,
+                                final_fit=final_fit,
+                                fname=fname,
+                                measure_id=st.session_state[f"n2_{sub_name}_measure_id"],
+                            )
 
 
 # =============================================================================
@@ -1977,7 +1976,6 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             file_name=filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"n2_{sub_name}_dl_excel",
-            on_click="ignore",
         )
         st.success("报告已生成！")
     except Exception as e:
