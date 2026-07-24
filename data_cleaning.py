@@ -34,24 +34,48 @@ def _render_dual_mode_cleaning():
     with col_cfa:
         up_cfa = st.file_uploader("上传 CFA 数据文件", type=["xlsx", "xls", "csv"], key="upload_cfa")
 
+    
     def _read_file(f):
         if f is None:
             return None
         try:
             data_bytes = f.getvalue()
             bio = io.BytesIO(data_bytes)
+    
             if f.name.endswith((".xlsx", ".xls")):
                 df = pd.read_excel(bio)
-                df = df.drop(df.index[0]).reset_index(drop=True)
+    
+                # ===== 判断是否存在重复表头 =====
+                check_headers = ["作答ID", "用户ID", "开始时间", "结束时间"]
+    
+                if len(df) > 0:
+                    first_row = (
+                        df.iloc[0, :len(check_headers)]
+                        .astype(str)
+                        .str.strip()
+                        .tolist()
+                    )
+                    columns = (
+                        df.columns[:len(check_headers)]
+                        .astype(str)
+                        .str.strip()
+                        .tolist()
+                    )
+    
+                    # 前4列均为重复表头，则删除第一行
+                    if first_row == columns == check_headers:
+                        df = df.iloc[1:].reset_index(drop=True)
+    
             else:
                 df = pd.read_csv(bio)
-            
-            # 导入后立即修剪表头两侧的隐形空格，防止诸如“说过谎。 ”和“说过谎。”匹配失败报错
-            df.columns = [str(c).strip() for c in df.columns]
+    
             return df
+    
         except Exception as e:
-            st.error(f"读取失败: {e}")
+            st.error(f"读取文件失败：{e}")
             return None
+
+
 
     def _file_fp(f):
         b = f.getvalue() if f is not None else b""
@@ -1667,14 +1691,37 @@ def render_data_cleaning():
         try:
             file_bytes = uploaded_file.getvalue()
             file_fp = hashlib.sha1(file_bytes).hexdigest()
+    
             if st.session_state.get("dc_upload_single_fp") != file_fp:
                 bio = io.BytesIO(file_bytes)
+    
                 if uploaded_file.name.endswith(('.xlsx', '.xls')):
-                    # 逻辑：统一删除第一行（index=0）- 保持原逻辑
                     df = pd.read_excel(bio)
-                    df = df.drop(df.index[0]).reset_index(drop=True)
+                    # 只判断前几个关键列名即可，例如判断前 4 列（作答ID、用户ID、开始时间、结束时间），如果第一行数据也是这几个值，就删除第一行；否则保留。
+                    # ===== 判断是否存在重复表头 =====
+                    check_headers = ["作答ID", "用户ID", "开始时间", "结束时间"]
+    
+                    if len(df) > 0:
+                        first_row = (
+                            df.iloc[0, :len(check_headers)]
+                            .astype(str)
+                            .str.strip()
+                            .tolist()
+                        )
+                        columns = (
+                            df.columns[:len(check_headers)]
+                            .astype(str)
+                            .str.strip()
+                            .tolist()
+                        )
+    
+                        # 前4列一致，则认为第一行是重复表头，删除
+                        if first_row == columns == check_headers:
+                            df = df.iloc[1:].reset_index(drop=True)
+    
                 else:
                     df = pd.read_csv(bio)
+
 
                 # 导入后立刻修剪表头前后的隐形空格，防止出现看似重名但由于空格不同而引发的报错或冗余列
                 df.columns = [str(c).strip() for c in df.columns]
