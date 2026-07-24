@@ -1918,7 +1918,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             rows.append({
                 "measure_id":  mid,
                 "item_number": item_number,
-                "item_text": re.sub(r'^\d+_', '', text or item_raw),
+                "item_text": text or item_raw,
                 "reverse": rev,
                 "variance_latent": trait_var, # ✨ 已成功获取
                 
@@ -2186,7 +2186,7 @@ def render_stage3_efa_no_deletion():
                 st.markdown("#### 4️⃣ 独立导出与确认")
                 
                 final_measure_id = st.text_input(
-                    f"✍️ 请确认或修改量表【{cfa_key}】最终用于【报告导出】的展示名称:",
+                    f"✍️ 量表 measure_id（唯一编码）:",
                     value=default_show_name,
                     key=f"stage3_input_show_id_{cfa_key}"
                 )
@@ -2220,7 +2220,8 @@ def render_stage3_efa_no_deletion():
                         
                         row = {
                             "measure_id": final_measure_id, 
-                            "item_text": item_txt,
+                            "item_number": item_num,
+                            "item_text": re.sub(r'^\d+_', '', item_txt),
                             "reverse": rev
                         }
                         for c in loadings.columns:
@@ -2248,7 +2249,7 @@ def render_stage3_efa_no_deletion():
                     is_previously_saved = cfa_key in st.session_state.N1_finalEFA
 
                     is_confirmed = st.checkbox(
-                        f"✅ 我已确认上述【终期验证】数据，锁定当前维度报告", 
+                        f"✅ 确认上述数据", 
                         value=is_previously_saved,
                         key=f"stage3_confirm_check_{cfa_key}"
                     )
@@ -2273,7 +2274,7 @@ def render_stage3_efa_no_deletion():
                         safe_measure_id = "".join(c for c in final_measure_id if c not in '[]:*?/\\ ')
                         
                         st.download_button(
-                            label=f"⬇️ 下载 【{final_measure_id}】 维度的终期验证 Excel 报告",
+                            label=f"⬇️ 下载 【{final_measure_id}】 维度的 最终EFA 报告",
                             data=single_buf.getvalue(),
                             file_name=f"{safe_measure_id}_finalEFA_report_{today_str}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
