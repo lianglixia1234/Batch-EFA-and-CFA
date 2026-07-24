@@ -1918,7 +1918,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             rows.append({
                 "measure_id":  mid,
                 "item_number": item_number,
-                "item_text": text or item_raw,
+                "item_text": re.sub(r'^\d+_', '', text or item_raw),
                 "reverse": rev,
                 "variance_latent": trait_var, # ✨ 已成功获取
                 
