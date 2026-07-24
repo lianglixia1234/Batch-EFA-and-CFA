@@ -553,8 +553,7 @@ def check_residual_normality(df, loadings):
 
 
 def render_stage1_efa_clean():
-    st.subheader("删题EFA分析 (批量模式)")
-    st.caption("将自动读取您在数据清洗阶段划分的所有 Measure，并依次执行全样本自动化迭代删题。")
+    st.caption("将自动读取数据清洗阶段划分的所有 Measure，并依次执行全样本自动化迭代删题。")
 
     # ==========================================================================
     # 1. 数据来源与 Measure 自动化识别
@@ -1273,7 +1272,7 @@ def render_stage2_cfa_clean():
     # 2. 选择要处理的量表 & 全局参数
     # ==========================================================================
     st.markdown("---")
-    st.markdown("### 🔍 第一步：勾选您本次需要分析的量表")
+    st.markdown("### 🔍 勾选需要分析的量表")
     selected_measure_ids = st.multiselect(
         "📂 请选择要拉入 CFA 自动优化删题流的量表（默认全选）：",
         options=list(all_upstream_measures.keys()),
@@ -1293,7 +1292,7 @@ def render_stage2_cfa_clean():
     # 3. 配置因子结构（每个量表一个标签页）
     # ==========================================================================
     st.markdown("---")
-    st.markdown("### 🛠️ 第二步：CFA 测量模型结构核对与锁定")
+    st.markdown("### 🛠️ CFA 测量模型结构核对")
     st.caption("请依次进入每个量表的标签页，核对或调整其因子结构配置。")
 
     cfa_ready_queue = {}
@@ -1995,7 +1994,6 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
 
 
 def render_stage3_efa_no_deletion():
-    st.subheader("最终不删题EFA分析 (批量模式)")
 
     # ==========================================================================
     # 1. 🔍 核心修改：直接按原 sub_name 读取第二部分 CFA 模块留存的资产 (N1_postCFA)
@@ -2035,7 +2033,6 @@ def render_stage3_efa_no_deletion():
     selected_cfa_keys = st.multiselect(
         "📂 请选择要进行不删题 EFA 分析的量表：",
         options=list(all_cfa_measures.keys()),
-        default=list(all_cfa_measures.keys()),
         key="stage3_multiselect_cfa_keys"
     )
 
