@@ -22,9 +22,9 @@ except ImportError:
     _DB_SAVE_AVAILABLE = False
 # from semopy import Model — 延迟到函数内导入
 
-from modules.n2_analysis import calculate_advanced_stats
-from modules.n1_analysis import cronbach_alpha
-from modules.utils import smart_multiselect, parse_item_col, sort_item_cols_by_number
+from single_factor_cfa import calculate_advanced_stats
+from n1_analysis import cronbach_alpha
+from utils import smart_multiselect, parse_item_col, sort_item_cols_by_number
 
 # ==============================================================================
 # 工具函数
