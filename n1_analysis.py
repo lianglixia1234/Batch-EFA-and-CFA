@@ -2315,7 +2315,7 @@ def render_stage3_efa_no_deletion():
 # 🌟 顶层三大板块隔离调度中心
 # ==============================================================================
 def render_n1_analysis():
-    st.title("模块 2: N1数据分析")
+    st.title("模块 2: N1 分析")
 
     # 使用 st.tabs 将三大核心分析板块在水平方向彻底隔离
     tab_efa_clean, tab_cfa_clean, tab_efa_final = st.tabs([
