@@ -2229,144 +2229,7 @@ def render_data_cleaning():
         _dataset_actions()
         
         
-        # ==========================================
-        # 第九步 创建复杂问卷 Measure Group
-        # ==========================================
-
-        st.subheader("9. 构建复杂问卷 Measure Group")
-
-        st.info(
-            "在这里，你可以将多个 Measure（第8步创建的子数据集）组合成一个 "
-            "Measure Group，用于后续分析。"
-        )
-
-        # 初始化
-        if "measure_groups" not in st.session_state:
-            st.session_state.measure_groups = {}
-
-        # 1. Measure Group 名称
-        group_name = st.text_input(
-            "Measure Group 名称",
-            value="Measure_Group_1",
-            key="measure_group_name"
-        )
-
-        # 2. 选择组成该 Group 的 Measure
-        available_subs = list(
-            st.session_state.sub_datasets.keys()
-        )
-
-        # 新增：修改已选标签字体颜色
-        st.markdown("""
-        <style>
-        [data-baseweb="tag"]{
-            color:red !important;
-            font-weight:600 !important;
-        }
         
-        [data-baseweb="tag"] span{
-            color:red !important;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-
-        
-        if "measure_group_selection" not in st.session_state:
-            st.session_state.measure_group_selection = []
-
-        selected_subs = st.multiselect(
-            "选择组成该 Measure Group 的 Measure",
-            options=available_subs,
-            default=st.session_state.measure_group_selection,
-            key="measure_group_selected"
-        )
-
-        st.session_state.measure_group_selection = selected_subs
-
-
-        # ==========================================
-        # 创建 + 删除区域
-        # ==========================================
-
-        @st.fragment
-        def _measure_group_actions():
-
-            _group_name = st.session_state.get(
-                "measure_group_name",
-                "Measure_Group_1"
-            )
-
-            _selected = st.session_state.get(
-                "measure_group_selected",
-                []
-            )
-
-            # 创建
-            if st.button(
-                "创建 Measure Group",
-                key="btn_create_measure_group"
-            ):
-
-                if not _group_name:
-                    st.error("请输入 Measure Group 名称")
-
-                elif not _selected:
-                    st.error("请至少选择一个 Measure")
-
-                else:
-
-                    st.session_state.measure_groups[
-                        _group_name
-                    ] = _selected
-
-                    st.success(
-                        f"成功创建 Measure Group：【{_group_name}】，包含 {len(_selected)} 个 Measure。"
-                    )
-
-            # 显示列表
-            if len(st.session_state.measure_groups) > 0:
-
-                st.write(
-                    "📊 **当前已保存的 Measure Group：**"
-                )
-
-                rows = []
-
-                for g, subs in st.session_state.measure_groups.items():
-
-                    rows.append({
-                        "Measure Group": g,
-                        "包含 Measure 数": len(subs),
-                        "Measures": ", ".join(subs)
-                    })
-
-                st.table(pd.DataFrame(rows))
-
-                # 删除
-                del_group = st.selectbox(
-                    "选择要删除的 Measure Group",
-                    ["(不删除)"] +
-                    list(
-                        st.session_state.measure_groups.keys()
-                    ),
-                    key="del_measure_group_select"
-                )
-
-                if del_group != "(不删除)":
-
-                    if st.button(
-                        "确认删除 Measure Group",
-                        key="btn_del_measure_group"
-                    ):
-
-                        del st.session_state.measure_groups[
-                            del_group
-                        ]
-
-                        st.rerun(scope="app")
-
-        _measure_group_actions()
-
 
         # ==========================================
 
@@ -2410,7 +2273,7 @@ def render_data_cleaning():
         # ==========================================
         # 9. 结果导出
         # ==========================================
-        st.subheader("10. 导出清洗后的数据")
+        st.subheader("9. 导出清洗后的数据")
         st.write(f"当前最终数据集行数: {len(st.session_state.df_current)}")
         
         # 将 DataFrame 转换为 Excel 字节流供下载
