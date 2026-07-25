@@ -2166,7 +2166,7 @@ def render_data_cleaning():
         # 8. 拆分 简单问卷 Measure
         # ==========================================
         st.subheader("8. 拆分 简单问卷 Measure")
-        st.info("在这里，你可以从清洗好的总表中挑选特定的题目（列），组成新的子数据集（例如：只包含量表题的数据集），供后续 N1/N2 分析使用。")
+        st.info("从清洗好的总表中挑选特定的题目（列），组成新的子数据集（例如：只包含量表题的数据集），供后续 N1/N2 分析使用。")
 
         # 初始化 sub_datasets 字典
         if 'sub_datasets' not in st.session_state:
