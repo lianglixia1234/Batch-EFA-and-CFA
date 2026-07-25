@@ -1634,7 +1634,7 @@ def render_multifactor_cfa():
         data_source_choice = st.radio("数据来源", source_options, key="n3_data_source")
 
     if has_dual_data and data_source_choice == "四数据集 (Dataset → Measure)":
-        from .data_cleaning_dual import get_dual_mode_analysis_df
+        from data_cleaning_dual import get_dual_mode_analysis_df
         dataset_names = ["Dataset1", "Dataset2", "Dataset4"]
         selected_dataset = st.selectbox("1. 选择数据集", dataset_names, key="n3_dual_dataset")
         measure_names = list(st.session_state.dc_measures.keys())
