@@ -1309,7 +1309,7 @@ def render_singlefactor_cfa():
                 user_name_f = st.session_state.get("user_name", "unknown_user")
                 safe_user_f = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name_f)).strip() or "unknown_user"
                 today_f = date.today().strftime("%Y-%m-%d")
-                formula_base = f"{safe_mid_f}_{cfa_type_f}_final_score_formula_{today_f}_{safe_user_f}"
+                formula_base = f"{safe_mid_f}_{cfa_type_f}_final_score_formula_{today_f}"
                 f1, f2, f3, f4 = st.columns(4)
                 with f1:
                     if st.session_state.get("n2_formula_csv_bytes"):
