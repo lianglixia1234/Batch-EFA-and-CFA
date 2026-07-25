@@ -197,7 +197,6 @@ def run_cfa_gui(df, factor_name, factor_items, method_name, method_items):
 # ==============================================================================
 
 def render_singlefactor_cfa():
-    st.title("Single-Factor CFA")
 
     # --- 1. 数据来源 ---
     st.sidebar.markdown("### 数据来源设置")
