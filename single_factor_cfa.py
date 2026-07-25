@@ -196,8 +196,8 @@ def run_cfa_gui(df, factor_name, factor_items, method_name, method_items):
 # 页面渲染逻辑
 # ==============================================================================
 
-def render_n2_analysis():
-    st.title("模块 3: Single-Factor CFA")
+def render_singlefactor_cfa()
+    st.title("Single-Factor CFA")
 
     # --- 1. 数据来源 ---
     st.sidebar.markdown("### 数据来源设置")
