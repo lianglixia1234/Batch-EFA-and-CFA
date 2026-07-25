@@ -1592,7 +1592,7 @@ def _build_higherorder_formula_table(
 # 页面渲染
 # ==============================================================================
 
-def render_n3_multifactor_cfa():
+def render_multifactor_cfa():
     st.title("Multi-Factor CFA")
 
     if "n3_merged_df" not in st.session_state:
