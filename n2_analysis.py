@@ -10,8 +10,8 @@ from scipy.stats import chi2
 from typing import Any, Tuple
 
 # 导入通用工具函数
-from .utils import smart_multiselect, parse_item_col, sort_item_cols_by_number
-from .n1_analysis import cronbach_alpha
+from utils import smart_multiselect, parse_item_col, sort_item_cols_by_number
+from n1_analysis import cronbach_alpha
 
 try:
     from db_save import save_formula_params, save_score_records, build_formula_params_json
