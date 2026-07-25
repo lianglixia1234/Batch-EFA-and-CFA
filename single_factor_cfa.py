@@ -228,7 +228,7 @@ def render_singlefactor_cfa():
     elif data_source == "💾 来自 Data Cleaning（四数据集）":
         from data_cleaning_dual import get_dual_mode_analysis_df
         dataset_names = ["Dataset1", "Dataset2", "Dataset3", "Dataset4"]
-        selected_dataset = st.selectbox("1. 选择数据集", dataset_names, key="n2_dual_dataset")
+        selected_dataset = st.selectbox("1. 选择数据集", dataset_names, index=1, key="n2_dual_dataset")
         measure_names = list(st.session_state.dc_measures.keys())
         if not measure_names:
             st.warning("请在数据清洗模块的「Measure 划分」中至少定义一个 Measure。")
