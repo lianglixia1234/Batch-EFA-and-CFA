@@ -832,7 +832,7 @@ def render_single_cfa():
                             rows.append({
                                 "measure_id": mid,
                                 "item_number": item_number,
-                                "item_text": text or item,
+                                "item_text": re.sub(r'^\d+_', '',text or item),
                                 "reverse": rev,
                                 "variance_latent": trait_var,
                                 "unstandardised_loading": loadings_unstd.get(item_clean, np.nan),
@@ -2603,7 +2603,7 @@ def render_batch_cfa():
                                 "GFI": _extract_fit_val(stats_dict, "GFI"),
                                 "AGFI": _extract_fit_val(stats_dict, "AGFI"),
                                 "NFI": _extract_fit_val(stats_dict, "NFI"),
-                                "LogL": _extract_fit_val(stats_dict, "LogL"),
+                                "LogL": _extract_fit_val(stats_dict, ["LogL", "logl", "LogLik", "loglik", "log_likelihood", "log-likelihood"]),
                                 "AIC": _extract_fit_val(stats_dict, "AIC"),
                                 "BIC": _extract_fit_val(stats_dict, "BIC"),
                                 "SABIC": _extract_fit_val(stats_dict, "SABIC"),
