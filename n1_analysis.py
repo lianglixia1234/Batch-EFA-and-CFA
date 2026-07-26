@@ -1960,7 +1960,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         safe_mid = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(mid)).strip(" .") or "measure"
         user_name = st.session_state.get("user_name", "unknown_user")
         safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
-        filename = f"{safe_mid}_precfa_report_{today}_{safe_user}.xlsx"
+        filename = f"{safe_mid}_precfa_report_{today}.xlsx"
 
         st.session_state.n2_report_sheet_items_preview = sheet_items.copy()
         st.session_state.n2_report_cov_preview = cov_matrix.copy() if not cov_matrix.empty else None
