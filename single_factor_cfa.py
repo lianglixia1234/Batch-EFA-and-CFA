@@ -901,7 +901,7 @@ def render_singlefactor_cfa():
                         user_name = st.session_state.get("user_name", "unknown_user")
                         safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
                         today = date.today().strftime("%Y-%m-%d")
-                        st.session_state.n2_excel_report_filename = f"{safe_mid_for_file}_{cfa_type}_report_{today}_{safe_user}.xlsx"
+                        st.session_state.n2_excel_report_filename = f"{safe_mid_for_file}_{cfa_type}_report_{today}.xlsx"
                         st.session_state.n2_report_sheet_items_preview = sheet_items.copy()
                         st.session_state.n2_report_cov_preview = cov_matrix.copy()
                         st.session_state.n2_cr_warning = cr_reason if (np.isnan(_to_num(cr_val)) and cr_reason) else ""
@@ -1106,7 +1106,7 @@ def render_singlefactor_cfa():
                     dataset_n = int(m.group(1)) if m else 4
                 else:
                     dataset_n = int(st.session_state.get("n2_scored_dataset_n", 1))
-                scored_base = f"{safe_mid}_{cfa_type}_dataset{dataset_n}_scored_{today}_{safe_user}"
+                scored_base = f"{safe_mid}_{cfa_type}_dataset{dataset_n}_scored_{today}"
                 col_dl1, col_dl2, col_dl3 = st.columns(3)
                 with col_dl1:
                     if st.session_state.get("n2_scored_csv_bytes"):
