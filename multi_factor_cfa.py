@@ -1592,7 +1592,7 @@ def _build_higherorder_formula_table(
 # 页面渲染
 # ==============================================================================
 
-def render_multifactor_cfa():
+def render_multi_cfa():
 
     if "n3_merged_df" not in st.session_state:
         st.session_state.n3_merged_df = None
@@ -2993,3 +2993,18 @@ def render_multifactor_cfa():
                                 mime="application/json",
                                 key="n3_download_ho_formula_json",
                             )
+
+
+
+
+
+def render_multifactor_cfa():
+    # 模式选择：单模型 or 批量
+    mode = st.radio("运行模式", ["单measure group CFA", "批量自动删题 multi CFA"], horizontal=True)
+    
+    if mode == "批量自动删题 multi CFA":
+        render_batch_multi_cfa()
+    else:
+        render_multi_cfa()  # 原有代码
+
+
