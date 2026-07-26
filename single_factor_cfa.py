@@ -2122,8 +2122,10 @@ def render_batch_cfa():
         from data_cleaning_dual import get_dual_mode_analysis_df
         
         dataset_names = ["Dataset1", "Dataset2", "Dataset3", "Dataset4"]
-        if "n2_dual_dataset" not in st.session_state:
-            st.session_state.n2_dual_dataset = dataset_names[1]
+        # 强制默认选择第二个
+        if "batch_dual_dataset" not in st.session_state:
+            st.session_state.batch_dual_dataset = dataset_names[1]
+            
         selected_dataset = st.selectbox(
             "选择数据集",
             dataset_names,
