@@ -1800,6 +1800,7 @@ def render_single_cfa():
 
 
 
+
 # ===========================================  批量single CFA
 
 # ==============================================================================
@@ -2046,17 +2047,16 @@ def run_auto_cfa_two_stages(df_clean, factor_name, method_name,
 # ==============================================================================
 
 def render_batch_cfa():
-    st.header("🔬 批量自动删题 Single-Factor CFA")
     st.markdown("""
     本模块支持从已保存的子数据集中批量运行多个 Measure 的自动删题 CFA 分析。
-    - **Stage 1（保质量）**：保证 CFI ≥ 0.90、TLI ≥ 0.90，未达标自动删题
-    - **Stage 2（求精简）**：追求 CFI ≥ 0.95、TLI ≥ 0.95，同时精简至目标题数
+    - *Stage 1（保质量）*：保证 CFI ≥ 0.90、TLI ≥ 0.90，未达标自动删题
+    - *Stage 2（求精简）*：追求 CFI ≥ 0.95、TLI ≥ 0.95，同时精简至目标题数
     """)
 
     # ==========================================================
     # 1. 数据来源：读取已保存的子数据集
     # ==========================================================
-    st.subheader("📂 请选择要拉入 CFA 自动优化删题流的量表")
+    st.subheader("📂 选择要分析的 Measure")
     
     has_sub_datasets = 'sub_datasets' in st.session_state and len(st.session_state.sub_datasets) > 0
     
@@ -2095,7 +2095,7 @@ def render_batch_cfa():
     # 2. 全局参数设置
     # ==========================================================
     st.markdown("---")
-    st.subheader("⚙️ 自动删题参数设置")
+    st.subheader("⚙️ 删题参数设置")
     
     col_p1, col_p2, col_p3 = st.columns(3)
     with col_p1:
@@ -2118,7 +2118,7 @@ def render_batch_cfa():
     # 3. 模型配置（Tab 形式，自动填充）
     # ==========================================================
     st.markdown("---")
-    st.subheader("🔧 检查每个量表的模型配置 (Model Configuration)")
+    st.subheader("🔧 检查模型配置 (Model Configuration)")
     st.caption("每个 Tab 对应一个量表。主因子名已自动填充为量表名，题目已自动全选，方法因子已按「末尾 r」规则预选。请确认或微调。")
 
     if "batch_measures_config" not in st.session_state:
@@ -2298,7 +2298,7 @@ def render_batch_cfa():
         return
 
     st.markdown("---")
-    st.subheader("📊 各量表分析结果与确认")
+    st.subheader("📊 分析结果")
 
     batch_results = st.session_state.batch_results
     
@@ -2664,6 +2664,403 @@ def render_batch_cfa():
                             key=f"batch_dl_report_{m_name}"
                         )
 
+                # ==========================================================
+                # 🧮 最终得分计算（基于 CFA）
+                # ==========================================================
+                st.markdown("---")
+                st.markdown("##### 🧮 最终得分计算（基于 CFA）")
+                st.caption("按公式：w = Σ⁻¹λφ，f_raw = wᵀ(x-μ)，z = f_raw / sqrt(wᵀΣw)，FinalScore = 80 + 10·z")
+                
+                sc1, sc2 = st.columns(2)
+                with sc1:
+                    n2_scale_min = st.number_input("scale_min", min_value=0, value=1, step=1, key=f"batch_smin_{m_name}")
+                with sc2:
+                    n2_scale_max = st.number_input("scale_max", min_value=1, value=7, step=1, key=f"batch_smax_{m_name}")
+                
+                if int(n2_scale_min) >= int(n2_scale_max):
+                    st.error("scale_min 必须小于 scale_max。")
+                
+                if st.button(f"🧮 计算最终得分并生成数据集", key=f"batch_calc_score_{m_name}"):
+                    try:
+                        df_cfa = st.session_state.batch_df_numeric[final['items']].dropna(axis=0)
+                        factor_items = final['items']
+                        est = final['estimates'].copy()
+                        fname = confirmed['factor_name']
+                        
+                        def _to_num(x):
+                            try:
+                                if x is None: return np.nan
+                                if isinstance(x, str):
+                                    x = x.strip()
+                                    if x in ("", "-", "nan", "NaN", "None"): return np.nan
+                                return float(x)
+                            except:
+                                return np.nan
+                        
+                        def _clean_col(name):
+                            return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
+                        
+                        sorted_items = sort_item_cols_by_number(factor_items)
+                        sorted_items_clean = [_clean_col(c) for c in sorted_items]
+                        used_cols = [c for c in sorted_items_clean if c in df_cfa.columns]
+                        if not used_cols:
+                            st.error("未找到可用于计算最终得分的题目列。")
+                            st.stop()
+                        
+                        x_df_all = df_cfa[used_cols].apply(pd.to_numeric, errors="coerce")
+                        missing_mask = x_df_all.isna().any(axis=1)
+                        n_missing = int(missing_mask.sum())
+                        x_df = x_df_all.loc[~missing_mask].copy()
+                        
+                        scored_df = x_df_all.copy()
+                        scored_df["relative_final_score"] = -999.0
+                        scored_df["absolute_final_score"] = -999.0
+                        
+                        if not x_df.empty:
+                            mu_vec = x_df.mean(axis=0).values.reshape(-1, 1)
+                            sigma = x_df.cov().values
+                            
+                            # 提取非标准化载荷 λ
+                            lambda_map = {}
+                            if {"LHS", "op", "RHS"}.issubset(est.columns):
+                                load_rows = est[(est["op"] == "=~") & (est["LHS"] == fname)]
+                                if not load_rows.empty:
+                                    for _, r in load_rows.iterrows():
+                                        lambda_map[str(r["RHS"])] = _to_num(r.get("Estimate", np.nan))
+                                else:
+                                    load_rows = est[(est["op"] == "~") & (est["RHS"] == fname)]
+                                    for _, r in load_rows.iterrows():
+                                        lambda_map[str(r["LHS"])] = _to_num(r.get("Estimate", np.nan))
+                            
+                            lambda_vec = np.array([_to_num(lambda_map.get(c, np.nan)) for c in used_cols], dtype=float).reshape(-1, 1)
+                            if np.isnan(lambda_vec).any():
+                                miss = [used_cols[i] for i, v in enumerate(lambda_vec.flatten()) if np.isnan(v)]
+                                st.error(f"部分题目无法匹配到 CFA 非标准化载荷：{', '.join(miss[:8])}")
+                                st.stop()
+                            
+                            # 提取主因子方差 φ
+                            phi = np.nan
+                            if {"LHS", "op", "RHS"}.issubset(est.columns):
+                                vv = est[(est["op"] == "~~") & (est["LHS"] == fname) & (est["RHS"] == fname)]
+                                if not vv.empty:
+                                    phi = _to_num(vv.iloc[0].get("Estimate", np.nan))
+                            if np.isnan(phi):
+                                st.error("未能从 CFA 结果中提取主因子方差 φ。")
+                                st.stop()
+                            
+                            # w = Σ^{-1} λ φ
+                            rhs = lambda_vec * phi
+                            try:
+                                w = np.linalg.solve(sigma, rhs)
+                            except np.linalg.LinAlgError:
+                                ridge = 1e-8 * np.eye(sigma.shape[0])
+                                w = np.linalg.solve(sigma + ridge, rhs)
+                                st.warning("协方差矩阵接近奇异，已使用微小岭稳定项。")
+                            
+                            # relative_final_score
+                            x_centered = x_df.values - mu_vec.T
+                            f_raw = (x_centered @ w).flatten()
+                            sd_cal = float(np.sqrt(np.maximum((w.T @ sigma @ w).item(), 1e-12)))
+                            z = f_raw / sd_cal
+                            final_score = 80 + 10 * z
+                            scored_df.loc[x_df.index, "relative_final_score"] = final_score
+                            
+                            # absolute_final_score
+                            w_vec = w.reshape(-1)
+                            L = float(n2_scale_min)
+                            U = float(n2_scale_max)
+                            lo = np.where(w_vec >= 0, L, U)
+                            hi = np.where(w_vec >= 0, U, L)
+                            s_min = float(w_vec @ lo)
+                            s_max = float(w_vec @ hi)
+                            den = s_max - s_min
+                            if den <= 1e-12:
+                                st.error("absolute final score 计算失败：S_max 与 S_min 过近。")
+                                st.stop()
+                            s_raw = (x_df.values @ w_vec).flatten()
+                            absolute_final_score = 100.0 * (s_raw - s_min) / den
+                            absolute_final_score = np.clip(absolute_final_score, 0.0, 100.0)
+                            scored_df.loc[x_df.index, "absolute_final_score"] = absolute_final_score
+                        
+                        st.session_state[f"batch_scored_df_{m_name}"] = scored_df
+                        
+                        # CSV
+                        csv_bytes = scored_df.to_csv(index=False).encode("utf-8-sig")
+                        st.session_state[f"batch_scored_csv_{m_name}"] = csv_bytes
+                        
+                        # Excel
+                        xlsx_buf = io.BytesIO()
+                        with pd.ExcelWriter(xlsx_buf, engine="xlsxwriter") as w_x:
+                            scored_df.to_excel(w_x, sheet_name="ScoredData", index=False)
+                        xlsx_buf.seek(0)
+                        st.session_state[f"batch_scored_xlsx_{m_name}"] = xlsx_buf.getvalue()
+                        
+                        if n_missing > 0:
+                            st.warning(f"检测到 {n_missing} 行样本存在缺失值，已记为 -999。")
+                        st.success(f"最终得分计算完成：{len(scored_df)} 个样本（有效计分 {len(x_df)} 行）。")
+                    except Exception as e:
+                        st.error(f"计算最终得分时出错: {e}")
+                        import traceback
+                        st.code(traceback.format_exc())
+                
+                # 预览 + 下载
+                if st.session_state.get(f"batch_scored_df_{m_name}") is not None:
+                    st.markdown("###### 数据预览（含最终得分，前20行）")
+                    preview_df = st.session_state[f"batch_scored_df_{m_name}"].head(20).copy()
+                    if "relative_final_score" in preview_df.columns:
+                        preview_df["relative_final_score"] = pd.to_numeric(preview_df["relative_final_score"], errors="coerce").round(3)
+                    if "absolute_final_score" in preview_df.columns:
+                        preview_df["absolute_final_score"] = pd.to_numeric(preview_df["absolute_final_score"], errors="coerce").round(3)
+                    st.dataframe(preview_df, use_container_width=True)
+                    
+                    cfa_type = "prelim_single_cfa" if st.session_state.get("batch_prelim") else "single_cfa"
+                    safe_mid = re.sub(r'[\\/:*?"<>|]+', '_', str(mid)).strip() or "measure"
+                    today = date.today().strftime("%Y-%m-%d")
+                    scored_base = f"{safe_mid}_{cfa_type}_scored_{today}"
+                    
+                    dl_c1, dl_c2 = st.columns(2)
+                    with dl_c1:
+                        if st.session_state.get(f"batch_scored_csv_{m_name}"):
+                            st.download_button(
+                                "⬇️ 下载得分数据（CSV）",
+                                data=st.session_state[f"batch_scored_csv_{m_name}"],
+                                file_name=f"{scored_base}.csv",
+                                mime="text/csv",
+                                key=f"batch_dl_scored_csv_{m_name}"
+                            )
+                    with dl_c2:
+                        if st.session_state.get(f"batch_scored_xlsx_{m_name}"):
+                            st.download_button(
+                                "⬇️ 下载得分数据（Excel）",
+                                data=st.session_state[f"batch_scored_xlsx_{m_name}"],
+                                file_name=f"{scored_base}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"batch_dl_scored_xlsx_{m_name}"
+                            )
+
+                # ==========================================================
+                # 📤 导出最终得分公式参数表
+                # ==========================================================
+                st.markdown("---")
+                st.markdown("##### 📤 导出最终得分公式参数表")
+                st.caption("导出部署时使用的线性公式参数：FinalScore = intercept + Σ(beta * item)")
+                st.caption(f"公式参数将使用上方 scale_min / scale_max（当前为 [{int(n2_scale_min)}, {int(n2_scale_max)}]）。")
+                
+                if st.button(f"📤 生成公式参数表", key=f"batch_gen_formula_{m_name}"):
+                    try:
+                        formula_scale_min = int(n2_scale_min)
+                        formula_scale_max = int(n2_scale_max)
+                        if formula_scale_min >= formula_scale_max:
+                            st.error("scale_min 必须小于 scale_max。")
+                            st.stop()
+                        
+                        df_cfa = st.session_state.batch_df_numeric[final['items']].dropna(axis=0)
+                        factor_items = final['items']
+                        est = final['estimates'].copy()
+                        fname = confirmed['factor_name']
+                        
+                        def _to_num(x):
+                            try:
+                                if x is None: return np.nan
+                                if isinstance(x, str):
+                                    x = x.strip()
+                                    if x in ("", "-", "nan", "NaN", "None"): return np.nan
+                                return float(x)
+                            except:
+                                return np.nan
+                        
+                        def _clean_col(name):
+                            return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
+                        
+                        sorted_items = sort_item_cols_by_number(factor_items)
+                        sorted_items_clean = [_clean_col(c) for c in sorted_items]
+                        used_cols = [c for c in sorted_items_clean if c in df_cfa.columns]
+                        if not used_cols:
+                            st.error("未找到可用于导出公式的题目列。")
+                            st.stop()
+                        
+                        x_df_all = df_cfa[used_cols].apply(pd.to_numeric, errors="coerce")
+                        x_df = x_df_all.dropna(axis=0, how="any")
+                        if x_df.empty:
+                            st.error("有效样本为空，无法导出公式参数。")
+                            st.stop()
+                        
+                        mu_vec = x_df.mean(axis=0).values.reshape(-1, 1)
+                        sigma = x_df.cov().values
+                        
+                        # 提取载荷
+                        lambda_map = {}
+                        if {"LHS", "op", "RHS"}.issubset(est.columns):
+                            load_rows = est[(est["op"] == "=~") & (est["LHS"] == fname)]
+                            if not load_rows.empty:
+                                for _, r in load_rows.iterrows():
+                                    lambda_map[str(r["RHS"])] = _to_num(r.get("Estimate", np.nan))
+                            else:
+                                load_rows = est[(est["op"] == "~") & (est["RHS"] == fname)]
+                                for _, r in load_rows.iterrows():
+                                    lambda_map[str(r["LHS"])] = _to_num(r.get("Estimate", np.nan))
+                        
+                        lambda_vec = np.array([_to_num(lambda_map.get(c, np.nan)) for c in used_cols], dtype=float).reshape(-1, 1)
+                        if np.isnan(lambda_vec).any():
+                            miss = [used_cols[i] for i, v in enumerate(lambda_vec.flatten()) if np.isnan(v)]
+                            st.error(f"部分题目缺少 CFA 非标准化载荷：{', '.join(miss[:8])}")
+                            st.stop()
+                        
+                        # 提取 φ
+                        phi = np.nan
+                        if {"LHS", "op", "RHS"}.issubset(est.columns):
+                            vv = est[(est["op"] == "~~") & (est["LHS"] == fname) & (est["RHS"] == fname)]
+                            if not vv.empty:
+                                phi = _to_num(vv.iloc[0].get("Estimate", np.nan))
+                        if np.isnan(phi):
+                            st.error("未能提取主因子方差 φ。")
+                            st.stop()
+                        
+                        # w = Σ^{-1} λ φ
+                        rhs = lambda_vec * phi
+                        try:
+                            w = np.linalg.solve(sigma, rhs)
+                        except np.linalg.LinAlgError:
+                            ridge = 1e-8 * np.eye(sigma.shape[0])
+                            w = np.linalg.solve(sigma + ridge, rhs)
+                        
+                        # relative 参数
+                        reporting_mean = 80.0
+                        reporting_sd = 10.0
+                        sd_cal = float(np.sqrt(np.maximum((w.T @ sigma @ w).item(), 1e-12)))
+                        beta_star = (reporting_sd / sd_cal) * w.flatten()
+                        intercept_star = float(reporting_mean - float(np.sum(beta_star * mu_vec.flatten())))
+                        
+                        # absolute 参数
+                        w_flat = w.flatten()
+                        l_abs = float(formula_scale_min)
+                        u_abs = float(formula_scale_max)
+                        lo = np.where(w_flat >= 0, l_abs, u_abs)
+                        hi = np.where(w_flat >= 0, u_abs, l_abs)
+                        s_min = float(w_flat @ lo)
+                        s_max = float(w_flat @ hi)
+                        den_abs = s_max - s_min
+                        if den_abs <= 1e-12:
+                            st.error("absolute 参数计算失败：S_max 与 S_min 过近。")
+                            st.stop()
+                        beta_abs = (100.0 / den_abs) * w_flat
+                        intercept_abs = float(-(100.0 / den_abs) * s_min)
+                        
+                        # 构建公式表
+                        created_date = date.today().strftime("%Y-%m-%d")
+                        formula_measure_id = str(mid).strip() or "measure"
+                        
+                        formula_items_rows = []
+                        for i, c in enumerate(used_cols):
+                            item_num, item_text = _extract_item_num_and_text(c)
+                            formula_items_rows.append({
+                                "measure_id": formula_measure_id,
+                                "item_col": str(c),
+                                "item_text": item_text,
+                                "item_num": item_num,
+                                "reverse": 1 if _is_reverse_coded(c) else 0,
+                                "beta_rel": float(beta_star[i]),
+                                "beta_abs": float(beta_abs[i]),
+                                "sort_order": i + 1,
+                                "intercept_rel": intercept_star,
+                                "intercept_abs": intercept_abs,
+                                "reporting_mean": reporting_mean,
+                                "reporting_sd": reporting_sd,
+                                "scale_min": int(formula_scale_min),
+                                "scale_max": int(formula_scale_max),
+                                "创建时间": created_date,
+                            })
+                        
+                        formula_df = pd.DataFrame(formula_items_rows)
+                        st.session_state[f"batch_formula_df_{m_name}"] = formula_df
+                        
+                        # CSV
+                        csv_bytes = formula_df.to_csv(index=False).encode("utf-8-sig")
+                        st.session_state[f"batch_formula_csv_{m_name}"] = csv_bytes
+                        
+                        # Excel
+                        buf_formula = io.BytesIO()
+                        with pd.ExcelWriter(buf_formula, engine="xlsxwriter") as w_f:
+                            formula_df.to_excel(w_f, sheet_name="formula", index=False)
+                        buf_formula.seek(0)
+                        st.session_state[f"batch_formula_xlsx_{m_name}"] = buf_formula.getvalue()
+                        
+                        # JSON
+                        import json
+                        def _native(v):
+                            if v is None or isinstance(v, (str, int, float, bool)):
+                                return v
+                            if hasattr(v, "item"):
+                                v = float(v) if hasattr(v, "__float__") else v
+                                return None if (v != v or abs(v) == float("inf")) else v
+                            return str(v) if hasattr(v, "isoformat") else v
+                        
+                        m_dict = {
+                            "measure_id": formula_measure_id,
+                            "CFA_model": "single-factor",
+                            "intercept_rel": intercept_star,
+                            "intercept_abs": intercept_abs,
+                            "reporting_mean": reporting_mean,
+                            "reporting_sd": reporting_sd,
+                            "scale_min": int(formula_scale_min),
+                            "scale_max": int(formula_scale_max),
+                            "创建时间": created_date,
+                        }
+                        items_list = [{k: _native(v) for k, v in r.items()} for r in formula_df.to_dict(orient="records")]
+                        json_bytes = json.dumps({"schema_version": 1, "measure": m_dict, "items": items_list}, ensure_ascii=False, indent=2).encode("utf-8")
+                        st.session_state[f"batch_formula_json_{m_name}"] = json_bytes
+                        
+                        st.success("✅ 公式参数表已生成！")
+                    except Exception as e:
+                        st.error(f"生成公式参数表失败: {e}")
+                        import traceback
+                        st.code(traceback.format_exc())
+                
+                # 预览 + 下载
+                if st.session_state.get(f"batch_formula_df_{m_name}") is not None:
+                    st.markdown("###### 公式参数表预览（前20行）")
+                    st.dataframe(st.session_state[f"batch_formula_df_{m_name}"].head(20), use_container_width=True)
+                    
+                    cfa_type = "prelim_single_cfa" if st.session_state.get("batch_prelim") else "single_cfa"
+                    safe_mid = re.sub(r'[\\/:*?"<>|]+', '_', str(mid)).strip() or "measure"
+                    today = date.today().strftime("%Y-%m-%d")
+                    formula_base = f"{safe_mid}_{cfa_type}_final_score_formula_{today}"
+                    
+                    dl_f1, dl_f2, dl_f3 = st.columns(3)
+                    with dl_f1:
+                        if st.session_state.get(f"batch_formula_csv_{m_name}"):
+                            st.download_button(
+                                "⬇️ 下载公式参数（CSV）",
+                                data=st.session_state[f"batch_formula_csv_{m_name}"],
+                                file_name=f"{formula_base}.csv",
+                                mime="text/csv",
+                                key=f"batch_dl_formula_csv_{m_name}"
+                            )
+                    with dl_f2:
+                        if st.session_state.get(f"batch_formula_xlsx_{m_name}"):
+                            st.download_button(
+                                "⬇️ 下载公式参数（Excel）",
+                                data=st.session_state[f"batch_formula_xlsx_{m_name}"],
+                                file_name=f"{formula_base}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"batch_dl_formula_xlsx_{m_name}"
+                            )
+                    with dl_f3:
+                        if st.session_state.get(f"batch_formula_json_{m_name}"):
+                            st.download_button(
+                                "⬇️ 下载公式参数（JSON）",
+                                data=st.session_state[f"batch_formula_json_{m_name}"],
+                                file_name=f"{formula_base}.json",
+                                mime="application/json",
+                                key=f"batch_dl_formula_json_{m_name}"
+                            )
+
+
+
+
+
+
+    
     # ==========================================================
     # 6. 全局确认清单（底部看板）
     # ==========================================================
