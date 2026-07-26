@@ -2962,57 +2962,21 @@ def render_batch_cfa():
                         beta_abs = (100.0 / den_abs) * w_flat
                         intercept_abs = float(-(100.0 / den_abs) * s_min)
                         
-                        # 构建公式表
+                        # 构建公式表（与原始代码完全一致的结构）
+                        dataset_name = (
+                            st.session_state.get("n2_dual_dataset")
+                            or st.session_state.get("n2_selected_dataset")
+                            or "batch_dataset"
+                        )
+                        measuregroup_title = str(st.session_state.get("n3_measuregroup_title", "") or "").strip()
                         created_date = date.today().strftime("%Y-%m-%d")
                         formula_measure_id = str(mid).strip() or "measure"
                         
-                        formula_items_rows = []
-                        for i, c in enumerate(used_cols):
-                            item_num, item_text = _extract_item_num_and_text(c)
-                            formula_items_rows.append({
-                                "measure_id": mid,
-                                "item_col": str(c),
-                                "item_text": item_text,
-                                "item_num": item_num,
-                                "reverse": 1 if _is_reverse_coded(c) else 0,
-                                "beta_rel": float(beta_star[i]),
-                                "beta_abs": float(beta_abs[i]),
-                                "sort_order": i + 1,
-                                "intercept_rel": intercept_star,
-                                "intercept_abs": intercept_abs,
-                                "reporting_mean": reporting_mean,
-                                "reporting_sd": reporting_sd,
-                                "scale_min": int(formula_scale_min),
-                                "scale_max": int(formula_scale_max),
-                                "创建时间": created_date,
-                            })
-                        
-                        formula_df = pd.DataFrame(formula_items_rows)
-                        st.session_state[f"batch_formula_df_{m_name}"] = formula_df
-                        
-                        # CSV
-                        csv_bytes = formula_df.to_csv(index=False).encode("utf-8-sig")
-                        st.session_state[f"batch_formula_csv_{m_name}"] = csv_bytes
-                        
-                        # Excel
-                        buf_formula = io.BytesIO()
-                        with pd.ExcelWriter(buf_formula, engine="xlsxwriter") as w_f:
-                            formula_df.to_excel(w_f, sheet_name="formula", index=False)
-                        buf_formula.seek(0)
-                        st.session_state[f"batch_formula_xlsx_{m_name}"] = buf_formula.getvalue()
-                        
-                        # JSON
-                        import json
-                        def _native(v):
-                            if v is None or isinstance(v, (str, int, float, bool)):
-                                return v
-                            if hasattr(v, "item"):
-                                v = float(v) if hasattr(v, "__float__") else v
-                                return None if (v != v or abs(v) == float("inf")) else v
-                            return str(v) if hasattr(v, "isoformat") else v
-                        
-                        m_dict = {
-                            "measure_id": formula_measure_id,
+                        # measure 表（1行）
+                        formula_measure_df = pd.DataFrame([{
+                            "measure_id": mid,
+                            "measuregroup_title": measuregroup_title,
+                            "dataset": str(dataset_name),
                             "CFA_model": "single-factor",
                             "intercept_rel": intercept_star,
                             "intercept_abs": intercept_abs,
@@ -3021,10 +2985,71 @@ def render_batch_cfa():
                             "scale_min": int(formula_scale_min),
                             "scale_max": int(formula_scale_max),
                             "创建时间": created_date,
-                        }
-                        items_list = [{k: _native(v) for k, v in r.items()} for r in formula_df.to_dict(orient="records")]
-                        json_bytes = json.dumps({"schema_version": 1, "measure": m_dict, "items": items_list}, ensure_ascii=False, indent=2).encode("utf-8")
-                        st.session_state[f"batch_formula_json_{m_name}"] = json_bytes
+                        }])
+                        
+                        # items 表（N行）
+                        formula_items_rows = []
+                        for i, c in enumerate(used_cols):
+                            item_num, item_text = _extract_item_num_and_text(c)
+                            formula_items_rows.append({
+                                "measure_id": mid,
+                                "item_col": str(c),
+                                "item_text": re.sub(r'^\d+_', '', item_text),
+                                "item_num": item_num,
+                                "reverse": 1 if _is_reverse_coded(c) else 0,
+                                "beta_rel": float(beta_star[i]),
+                                "beta_abs": float(beta_abs[i]),
+                                "sort_order": i + 1,
+                                "创建时间": created_date,
+                            })
+                        formula_items_df = pd.DataFrame(formula_items_rows)
+                        
+                        # 合并为扁平格式
+                        formula_flat = formula_items_df.copy()
+                        formula_flat["intercept_rel"] = intercept_star
+                        formula_flat["intercept_abs"] = intercept_abs
+                        
+                        # Excel/CSV 导出：扁平化单表（measure 列合并进 items）
+                        export_flat = formula_items_df.copy()
+                        for col, val in formula_measure_df.iloc[0].items():
+                            if col not in export_flat.columns:
+                                export_flat[col] = val
+                        cols_order = ["measure_id", "measuregroup_title", "dataset", "CFA_model", "intercept_rel", "intercept_abs",
+                                      "reporting_mean", "reporting_sd", "scale_min", "scale_max", "创建时间",
+                                      "item_col", "item_text", "item_num", "reverse", "beta_rel", "beta_abs", "sort_order"]
+                        export_flat = export_flat[[c for c in cols_order if c in export_flat.columns]]
+                        
+                        # 保存到 session_state
+                        st.session_state[f"batch_formula_df_{m_name}"] = formula_flat
+                        st.session_state[f"batch_formula_measure_df_{m_name}"] = formula_measure_df
+                        st.session_state[f"batch_formula_items_df_{m_name}"] = formula_items_df
+                        
+                        # CSV / Excel
+                        st.session_state[f"batch_formula_csv_bytes_{m_name}"] = export_flat.to_csv(index=False).encode("utf-8-sig")
+                        buf_formula = io.BytesIO()
+                        with pd.ExcelWriter(buf_formula, engine="xlsxwriter") as w_f:
+                            export_flat.to_excel(w_f, sheet_name="formula", index=False)
+                        buf_formula.seek(0)
+                        st.session_state[f"batch_formula_xlsx_bytes_{m_name}"] = buf_formula.getvalue()
+                        
+                        # JSON
+                        m_df = formula_measure_df
+                        i_df = formula_items_df
+                        if build_formula_params_json:
+                            json_bytes = build_formula_params_json(m_df, i_df).encode("utf-8")
+                        else:
+                            import json
+                            def _native(v):
+                                if v is None or isinstance(v, (str, int, float, bool)):
+                                    return v
+                                if hasattr(v, "item"):
+                                    v = float(v) if hasattr(v, "__float__") else v
+                                    return None if (v != v or abs(v) == float("inf")) else v
+                                return str(v) if hasattr(v, "isoformat") else v
+                            m_dict = {k: _native(v) for k, v in m_df.iloc[0].to_dict().items()}
+                            items_list = [{k: _native(v) for k, v in r.items()} for r in i_df.to_dict(orient="records")]
+                            json_bytes = json.dumps({"schema_version": 1, "measure": m_dict, "items": items_list}, ensure_ascii=False, indent=2).encode("utf-8")
+                        st.session_state[f"batch_formula_json_bytes_{m_name}"] = json_bytes
                         
                         st.success("✅ 公式参数表已生成！")
                     except Exception as e:
@@ -3035,7 +3060,14 @@ def render_batch_cfa():
                 # 预览 + 下载
                 if st.session_state.get(f"batch_formula_df_{m_name}") is not None:
                     st.markdown("###### 公式参数表预览（前20行）")
-                    st.dataframe(st.session_state[f"batch_formula_df_{m_name}"].head(20), use_container_width=True)
+                    m_df = st.session_state.get(f"batch_formula_measure_df_{m_name}")
+                    i_df = st.session_state.get(f"batch_formula_items_df_{m_name}")
+                    if m_df is not None and i_df is not None:
+                        preview_flat = i_df.copy()
+                        for col, val in m_df.iloc[0].items():
+                            if col not in preview_flat.columns:
+                                preview_flat[col] = val
+                        st.dataframe(preview_flat.head(20), use_container_width=True)
                     
                     cfa_type = "prelim_single_cfa" if st.session_state.get("batch_prelim") else "single_cfa"
                     safe_mid = re.sub(r'[\\/:*?"<>|]+', '_', str(mid)).strip() or "measure"
@@ -3044,28 +3076,28 @@ def render_batch_cfa():
                     
                     dl_f1, dl_f2, dl_f3 = st.columns(3)
                     with dl_f1:
-                        if st.session_state.get(f"batch_formula_csv_{m_name}"):
+                        if st.session_state.get(f"batch_formula_csv_bytes_{m_name}"):
                             st.download_button(
                                 "⬇️ 下载公式参数（CSV）",
-                                data=st.session_state[f"batch_formula_csv_{m_name}"],
+                                data=st.session_state[f"batch_formula_csv_bytes_{m_name}"],
                                 file_name=f"{formula_base}.csv",
                                 mime="text/csv",
                                 key=f"batch_dl_formula_csv_{m_name}"
                             )
                     with dl_f2:
-                        if st.session_state.get(f"batch_formula_xlsx_{m_name}"):
+                        if st.session_state.get(f"batch_formula_xlsx_bytes_{m_name}"):
                             st.download_button(
                                 "⬇️ 下载公式参数（Excel）",
-                                data=st.session_state[f"batch_formula_xlsx_{m_name}"],
+                                data=st.session_state[f"batch_formula_xlsx_bytes_{m_name}"],
                                 file_name=f"{formula_base}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key=f"batch_dl_formula_xlsx_{m_name}"
                             )
                     with dl_f3:
-                        if st.session_state.get(f"batch_formula_json_{m_name}"):
+                        if st.session_state.get(f"batch_formula_json_bytes_{m_name}"):
                             st.download_button(
                                 "⬇️ 下载公式参数（JSON）",
-                                data=st.session_state[f"batch_formula_json_{m_name}"],
+                                data=st.session_state[f"batch_formula_json_bytes_{m_name}"],
                                 file_name=f"{formula_base}.json",
                                 mime="application/json",
                                 key=f"batch_dl_formula_json_{m_name}"
