@@ -1799,10 +1799,8 @@ def render_single_cfa():
 
 
 
-# ==============================================================================
-# 批量自动删题CFA核心算法
-# ==============================================================================
 
+# ===========================================  批量single CFA
 
 # ==============================================================================
 # 批量自动删题CFA核心算法（两阶段）
@@ -2044,7 +2042,7 @@ def run_auto_cfa_two_stages(df_clean, factor_name, method_name,
 
 
 # ==============================================================================
-# 批量自动删题CFA页面
+# 批量自动删题CFA页面（完整版，含 cronbach_alpha + CR + 完整下载）
 # ==============================================================================
 
 def render_batch_cfa():
@@ -2066,7 +2064,6 @@ def render_batch_cfa():
         st.warning("未检测到已保存的子数据集。请先前往 Data Cleaning 模块保存子数据集。")
         return
 
-    # 获取所有子数据集，默认全选
     all_dataset_names = list(st.session_state.sub_datasets.keys())
     selected_dataset_names = st.multiselect(
         "选择已保存的子数据集（默认全选）：",
@@ -2079,13 +2076,10 @@ def render_batch_cfa():
         st.warning("请至少选择一个子数据集。")
         return
 
-    # 构建 measure 映射：每个子数据集 = 一个 measure
     available_measures = {}
     for ds_name in selected_dataset_names:
         df_sub = st.session_state.sub_datasets[ds_name].copy()
-        # 清洗列名
         df_sub.columns = [re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(c)) for c in df_sub.columns]
-        # 只保留数值列
         df_num = df_sub.apply(pd.to_numeric, errors='coerce').dropna(axis=1, how='all')
         num_cols = df_num.columns.tolist()
         if num_cols:
@@ -2127,11 +2121,9 @@ def render_batch_cfa():
     st.subheader("🔧 检查每个量表的模型配置 (Model Configuration)")
     st.caption("每个 Tab 对应一个量表。主因子名已自动填充为量表名，题目已自动全选，方法因子已按「末尾 r」规则预选。请确认或微调。")
 
-    # 初始化配置缓存
     if "batch_measures_config" not in st.session_state:
         st.session_state.batch_measures_config = {}
 
-    # 自动初始化每个量表的配置
     for m_name in available_measures.keys():
         if m_name not in st.session_state.batch_measures_config:
             items = available_measures[m_name]['items']
@@ -2141,7 +2133,6 @@ def render_batch_cfa():
                 'method_items': [c for c in items if _is_reverse_coded(c)],
             }
 
-    # Tab 显示每个 Measure 的配置
     measure_names = list(available_measures.keys())
     measure_tabs = st.tabs([f"📋 {m}" for m in measure_names])
 
@@ -2166,7 +2157,6 @@ def render_batch_cfa():
                     key=f"batch_method_name_{m_name}"
                 )
 
-            # 主因子题目（自动全选，用户可取消）
             current_items = [c for c in config.get('items', []) if c in all_items]
             factor_items = smart_multiselect(
                 options=all_items,
@@ -2177,7 +2167,6 @@ def render_batch_cfa():
             )
             st.session_state.batch_measures_config[m_name]['items'] = list(factor_items)
 
-            # 方法因子题目
             method_options = list(factor_items) if factor_items else []
             method_key_suffix = f"batch_method_{m_name}"
             method_sig_key = f"{method_key_suffix}_options_sig"
@@ -2228,7 +2217,6 @@ def render_batch_cfa():
         st.session_state.batch_prelim = prelim_checked
 
     if run_clicked:
-        # 校验
         invalid_measures = []
         for m_name in measure_names:
             config = st.session_state.batch_measures_config[m_name]
@@ -2239,7 +2227,6 @@ def render_batch_cfa():
             st.error(f"❌ 以下量表未选择题目：{', '.join(invalid_measures)}")
             return
         
-        # 合并所有量表的数据（列取并集，行取交集）
         all_cols = set()
         for m_name in measure_names:
             all_cols.update(st.session_state.batch_measures_config[m_name]['items'])
@@ -2265,7 +2252,6 @@ def render_batch_cfa():
         
         st.info(f"合并数据：{len(df_numeric)} 行样本 × {len(df_numeric.columns)} 列")
         
-        # 构建运行配置
         run_config = {}
         for m_name in measure_names:
             items = [c for c in st.session_state.batch_measures_config[m_name]['items'] if c in df_numeric.columns]
@@ -2276,7 +2262,6 @@ def render_batch_cfa():
                     'method_items': [c for c in st.session_state.batch_measures_config[m_name]['method_items'] if c in items],
                 }
         
-        # 执行批量运行
         batch_results = {}
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -2302,6 +2287,9 @@ def render_batch_cfa():
         st.session_state.batch_df_numeric = df_numeric
         st.session_state.batch_run_config = run_config
         st.session_state.batch_measure_names = measure_names
+        
+        st.session_state.batch_confirmed = {}
+        st.session_state.batch_selected_standard = {}
 
     # ==========================================================
     # 5. 结果展示
@@ -2314,11 +2302,11 @@ def render_batch_cfa():
 
     batch_results = st.session_state.batch_results
     
-    # 初始化确认状态
-    if "batch_adopted_standard" not in st.session_state:
-        st.session_state.batch_adopted_standard = {}  # {m_name: 'stage1' or 'stage2'}
+    if "batch_confirmed" not in st.session_state:
+        st.session_state.batch_confirmed = {}
+    if "batch_selected_standard" not in st.session_state:
+        st.session_state.batch_selected_standard = {}
 
-    # 每个量表一个 Tab
     result_tabs = st.tabs([f"📈 {m}" for m in measure_names])
 
     for idx, m_name in enumerate(measure_names):
@@ -2333,7 +2321,7 @@ def render_batch_cfa():
             s1_final = s1['final'] if s1 else None
             s2_final = s2['final'] if s2 else None
 
-            # ---- 两个标准的对比表格 ----
+            # ---- 5.1 两个标准的对比表格 ----
             st.markdown("##### 📋 两个标准结果对比")
             
             compare_data = []
@@ -2361,28 +2349,7 @@ def render_batch_cfa():
             compare_df = pd.DataFrame(compare_data)
             st.dataframe(compare_df, use_container_width=True, hide_index=True)
 
-            # ---- 选择采用哪个标准 ----
-            adopt_options = []
-            if s1_final:
-                adopt_options.append("标准1（保质量）")
-            if s2_final:
-                adopt_options.append("标准2（求精简）")
-            
-            current_adopt = st.session_state.batch_adopted_standard.get(m_name)
-            default_idx = 0
-            if current_adopt == 'stage2' and len(adopt_options) > 1:
-                default_idx = 1
-            
-            adopted = st.radio(
-                f"请选择 `{m_name}` 采用的标准：",
-                options=adopt_options,
-                index=default_idx,
-                key=f"batch_adopt_{m_name}",
-                horizontal=True
-            )
-            st.session_state.batch_adopted_standard[m_name] = 'stage1' if '标准1' in adopted else 'stage2'
-
-            # ---- Stage 1 / Stage 2 详细结果（Tabs）----
+            # ---- 5.2 Stage 1 / Stage 2 详细结果 ----
             detail_tabs = st.tabs(["标准1（保质量）详情", "标准2（求精简）详情"])
             
             for tab_idx, (tab_name, stage_data, stage_key) in enumerate([
@@ -2415,7 +2382,7 @@ def render_batch_cfa():
                     else:
                         st.write("无删题记录（模型首次即达标）。")
 
-                    # 关键指标卡片
+                    # 关键指标
                     st.markdown("###### 🏆 关键模型拟合指标")
                     metrics = {
                         "CFI": final['cfi'], "TLI": final['tli'],
@@ -2426,7 +2393,6 @@ def render_batch_cfa():
                         display = f"{v:.3f}" if not np.isnan(v) else "N/A"
                         m_cols[i].metric(label=k, value=display)
                     
-                    # 更多指标
                     fit_stats = final['fit_stats']
                     more_metrics = {
                         "Chi-Square (User Model)": _extract_fit_val(fit_stats, 'chi2'),
@@ -2463,50 +2429,276 @@ def render_batch_cfa():
                     final_cols = [c for c in display_cols if c in est_df.columns]
                     st.dataframe(est_df[final_cols].style.format(format_dict))
                     
-                    # 模型语法
                     with st.expander("查看模型语法"):
                         st.code(final['syntax'], language="text")
+
+            # ---- 5.3 底部：选择标准 + 确认按钮 ----
+            st.markdown("---")
+            st.markdown("##### 🔒 确认采用标准")
+            
+            adopt_options = []
+            if s1_final:
+                adopt_options.append(("标准1（保质量）", "stage1"))
+            if s2_final:
+                adopt_options.append(("标准2（求精简）", "stage2"))
+            
+            if not adopt_options:
+                st.warning("无可用标准供选择。")
+                continue
+            
+            current_confirmed = st.session_state.batch_confirmed.get(m_name, {})
+            default_label = "标准1（保质量）"
+            if current_confirmed.get('stage') == 'stage2' and len(adopt_options) > 1:
+                default_label = "标准2（求精简）"
+            
+            selected_label = st.radio(
+                f"请选择 `{m_name}` 采用的标准：",
+                options=[opt[0] for opt in adopt_options],
+                index=[opt[0] for opt in adopt_options].index(default_label) if default_label in [opt[0] for opt in adopt_options] else 0,
+                key=f"batch_adopt_radio_{m_name}",
+                horizontal=True
+            )
+            selected_stage = [opt[1] for opt in adopt_options if opt[0] == selected_label][0]
+            st.session_state.batch_selected_standard[m_name] = selected_stage
+
+            confirm_clicked = st.button(
+                f"✅ 确认采用 {selected_label}",
+                key=f"batch_confirm_btn_{m_name}",
+                use_container_width=True
+            )
+            
+            if confirm_clicked:
+                stage_data = res.get(selected_stage)
+                if stage_data and stage_data['final']:
+                    final = stage_data['final']
+                    st.session_state.batch_confirmed[m_name] = {
+                        'stage': selected_stage,
+                        'stage_label': selected_label,
+                        'final': final,
+                        'factor_name': st.session_state.batch_measures_config[m_name]['factor_name'],
+                        'method_name': 'Method',
+                        'measure_id': m_name,
+                    }
+                    st.success(f"✅ 已确认 `{m_name}` 采用 **{selected_label}**，题目数 **{final['n_items']}**，CFI **{final['cfi']:.3f}**，TLI **{final['tli']:.3f}**。")
+                    st.rerun()
+
+            # ---- 5.4 如果已确认，显示下载区域 ----
+            if m_name in st.session_state.batch_confirmed:
+                confirmed = st.session_state.batch_confirmed[m_name]
+                final = confirmed['final']
+                
+                st.markdown("---")
+                st.markdown("##### 📥 下载已确认结果")
+                
+                mid = st.text_input(
+                    "量表 measure_id（唯一编码，用于文件命名）",
+                    value=confirmed.get('measure_id', m_name),
+                    key=f"batch_mid_{m_name}"
+                )
+                
+                # 生成报告按钮
+                if st.button(f"📊 生成 Excel 报告", key=f"batch_gen_report_{m_name}"):
+                    try:
+                        df_cfa = st.session_state.batch_df_numeric[final['items']].dropna(axis=0)
+                        estimates = final['estimates']
+                        stats_dict = final['fit_stats']
+                        fname = confirmed['factor_name']
+                        
+                        def _to_num(x):
+                            try:
+                                if x is None: return np.nan
+                                if isinstance(x, str):
+                                    x = x.strip()
+                                    if x in ("", "-", "nan", "NaN", "None"): return np.nan
+                                return float(x)
+                            except:
+                                return np.nan
+                        
+                        # 提取载荷（兼容 semopy 两种输出格式）
+                        loadings_unstd = {}
+                        loadings_std = {}
+                        if {"LHS", "op", "RHS"}.issubset(estimates.columns):
+                            load_rows = estimates[(estimates["op"] == "=~") & (estimates["LHS"] == fname)]
+                            if load_rows.empty:
+                                load_rows = estimates[(estimates["op"] == "~") & (estimates["RHS"] == fname)]
+                                for _, r in load_rows.iterrows():
+                                    loadings_unstd[str(r["LHS"])] = _to_num(r.get("Estimate", np.nan))
+                                    loadings_std[str(r["LHS"])] = _to_num(r.get("Std.all", np.nan))
+                            else:
+                                for _, r in load_rows.iterrows():
+                                    loadings_unstd[str(r["RHS"])] = _to_num(r.get("Estimate", np.nan))
+                                    loadings_std[str(r["RHS"])] = _to_num(r.get("Std.all", np.nan))
+                        
+                        # 提取潜变量方差
+                        trait_var = np.nan
+                        vv = estimates[(estimates["op"] == "~~") & (estimates["LHS"] == fname) & (estimates["RHS"] == fname)]
+                        if not vv.empty:
+                            trait_var = _to_num(vv.iloc[0].get("Estimate", np.nan))
+                        
+                        # 计算 Cronbach's Alpha
+                        alpha_val = cronbach_alpha(df_cfa) if not df_cfa.empty else np.nan
+                        
+                        # 计算 Composite Reliability (CR)
+                        cr_val = np.nan
+                        cr_reason = ""
+                        try:
+                            sorted_items_cr = sort_item_cols_by_number(final['items'])
+                            used_cols_cr = [c for c in sorted_items_cr if c in df_cfa.columns]
+                            if not used_cols_cr:
+                                cr_reason = "CR 未计算：未找到题目列。"
+                            else:
+                                x_cr = df_cfa[used_cols_cr].apply(pd.to_numeric, errors="coerce").dropna(axis=0, how="any")
+                                if x_cr.empty:
+                                    cr_reason = "CR 未计算：有效样本为空。"
+                                else:
+                                    sigma_cr = x_cr.cov().values
+                                    s_vec = np.sqrt(np.diag(sigma_cr))
+                                    lambda_unstd_vec = np.array(
+                                        [_to_num(loadings_unstd.get(c, np.nan)) for c in used_cols_cr],
+                                        dtype=float,
+                                    )
+                                    phi_num = _to_num(trait_var)
+                                    if np.isnan(phi_num) or phi_num <= 0:
+                                        cr_reason = "CR 未计算：主因子方差 φ 缺失或非正数。"
+                                    elif np.isnan(lambda_unstd_vec).any():
+                                        miss_cols = [used_cols_cr[i] for i, v in enumerate(lambda_unstd_vec) if np.isnan(v)]
+                                        cr_reason = f"CR 未计算：以下题目缺少载荷：{', '.join(miss_cols[:6])}"
+                                    elif (not np.all(np.isfinite(s_vec))) or np.any(s_vec <= 0):
+                                        cr_reason = "CR 未计算：题目标准差存在无效值。"
+                                    else:
+                                        lambda_std = (lambda_unstd_vec * np.sqrt(phi_num)) / s_vec
+                                        S = float(np.sum(lambda_std))
+                                        E = float(np.sum(1.0 - lambda_std ** 2))
+                                        den = (S ** 2) + E
+                                        if np.isfinite(den) and den > 0:
+                                            cr_val = float((S ** 2) / den)
+                                        else:
+                                            cr_reason = "CR 未计算：分母无效。"
+                        except Exception as cr_e:
+                            cr_val = np.nan
+                            cr_reason = f"CR 未计算：异常（{cr_e}）。"
+                        
+                        # 构建题目明细表
+                        sorted_items = sort_item_cols_by_number(final['items'])
+                        rows = []
+                        for idx_i, item in enumerate(sorted_items, start=1):
+                            _, num, text = parse_item_col(item)
+                            rev = 1 if _is_reverse_coded(item) else 0
+                            item_number = num if num is not None else idx_i
+                            rows.append({
+                                "measure_id": mid,
+                                "item_number": item_number,
+                                "item_text": re.sub(r'^\d+_', '', text or item),
+                                "reverse": rev,
+                                "variance_latent": trait_var,
+                                "unstandardised_loading": loadings_unstd.get(item, np.nan),
+                                "standardised_loading": loadings_std.get(item, np.nan),
+                                "chi2_user_model": _extract_fit_val(stats_dict, "chi2"),
+                                "df_user_model": _extract_fit_val(stats_dict, "DoF"),
+                                "p_value_user_model": _extract_fit_val(stats_dict, "chi2 p-value"),
+                                "CFI": _extract_fit_val(stats_dict, "CFI"),
+                                "TLI": _extract_fit_val(stats_dict, "TLI"),
+                                "RMSEA": _extract_fit_val(stats_dict, "RMSEA"),
+                                "SRMR": _extract_fit_val(stats_dict, "SRMR"),
+                                "GFI": _extract_fit_val(stats_dict, "GFI"),
+                                "AGFI": _extract_fit_val(stats_dict, "AGFI"),
+                                "NFI": _extract_fit_val(stats_dict, "NFI"),
+                                "LogL": _extract_fit_val(stats_dict, "LogL"),
+                                "AIC": _extract_fit_val(stats_dict, "AIC"),
+                                "BIC": _extract_fit_val(stats_dict, "BIC"),
+                                "SABIC": _extract_fit_val(stats_dict, "SABIC"),
+                                "item_mean": df_cfa[item].mean() if item in df_cfa.columns else np.nan,
+                                "item_sd": df_cfa[item].std() if item in df_cfa.columns else np.nan,
+                                "cronbach_alpha": alpha_val,
+                                "Composite Reliability (CR)": cr_val,
+                            })
+                        
+                        sheet_items = pd.DataFrame(rows)
+                        
+                        # 校验
+                        unstd_empty = sheet_items["unstandardised_loading"].isna().all()
+                        std_empty = sheet_items["standardised_loading"].isna().all()
+                        if unstd_empty and std_empty:
+                            st.error("生成前校验未通过：载荷全为空。请检查模型输出。")
+                            st.stop()
+                        
+                        # 协方差矩阵
+                        cov_matrix = df_cfa[sorted_items].cov() if all(c in df_cfa.columns for c in sorted_items) else pd.DataFrame()
+                        
+                        buf = io.BytesIO()
+                        with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
+                            sheet_items.to_excel(w, sheet_name="Items", index=False)
+                            if not cov_matrix.empty:
+                                cov_matrix.to_excel(w, sheet_name="Covariance", index=True)
+                        buf.seek(0)
+                        
+                        cfa_type = "prelim_single_cfa" if st.session_state.get("batch_prelim") else "single_cfa"
+                        safe_mid = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(mid)).strip(" .") or "measure"
+                        today = date.today().strftime("%Y-%m-%d")
+                        filename = f"{safe_mid}_{cfa_type}_report_{today}.xlsx"
+                        
+                        st.session_state[f"batch_report_bytes_{m_name}"] = buf.getvalue()
+                        st.session_state[f"batch_report_filename_{m_name}"] = filename
+                        st.session_state[f"batch_report_preview_{m_name}"] = sheet_items.copy()
+                        st.session_state[f"batch_cr_warning_{m_name}"] = cr_reason if (np.isnan(_to_num(cr_val)) and cr_reason) else ""
+                        st.success("✅ Excel 报告已生成！")
+                    except Exception as e:
+                        st.error(f"生成报告失败: {e}")
+                        import traceback
+                        st.code(traceback.format_exc())
+                
+                # 显示预览和下载
+                if st.session_state.get(f"batch_report_preview_{m_name}") is not None:
+                    st.markdown("###### 预览：题目明细表（前20行）")
+                    st.dataframe(st.session_state[f"batch_report_preview_{m_name}"].head(20), use_container_width=True)
+                    
+                    if st.session_state.get(f"batch_cr_warning_{m_name}"):
+                        st.warning(st.session_state[f"batch_cr_warning_{m_name}"])
+                    
+                    if st.session_state.get(f"batch_report_bytes_{m_name}"):
+                        st.download_button(
+                            "⬇️ 下载 Excel 报告",
+                            data=st.session_state[f"batch_report_bytes_{m_name}"],
+                            file_name=st.session_state.get(f"batch_report_filename_{m_name}", "report.xlsx"),
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"batch_dl_report_{m_name}"
+                        )
 
     # ==========================================================
     # 6. 全局确认清单（底部看板）
     # ==========================================================
     st.markdown("---")
     st.subheader("📋 Single-CFA 确认清单")
-    st.caption("以下展示所有已分析量表的确认状态。请在上方每个量表中选择采用的标准。")
+    st.caption("以下仅展示已点击「✅ 确认采用」的量表。")
 
-    if not st.session_state.batch_adopted_standard:
-        st.info("💡 暂无确认记录。请先运行分析并在上方各量表标签页中选择采用的标准。")
+    confirmed_measures = st.session_state.get("batch_confirmed", {})
+    
+    if not confirmed_measures:
+        st.info("💡 当前暂无已确认的量表。请在上方各量表标签页中查看结果、选择标准并点击确认。")
     else:
         summary_rows = []
-        for m_name in measure_names:
-            adopted = st.session_state.batch_adopted_standard.get(m_name)
-            if adopted and m_name in batch_results:
-                res = batch_results[m_name]
-                stage_data = res.get(adopted)
-                if stage_data and stage_data['final']:
-                    final = stage_data['final']
-                    summary_rows.append({
-                        "Measure": m_name,
-                        "采用标准": "标准1（保质量）" if adopted == 'stage1' else "标准2（求精简）",
-                        "保留题目数": final['n_items'],
-                        "CFI": f"{final['cfi']:.3f}" if not np.isnan(final['cfi']) else "N/A",
-                        "TLI": f"{final['tli']:.3f}" if not np.isnan(final['tli']) else "N/A",
-                        "RMSEA": f"{final['rmsea']:.3f}" if not np.isnan(final['rmsea']) else "N/A",
-                        "SRMR": f"{final['srmr']:.3f}" if not np.isnan(final['srmr']) else "N/A",
-                        "保留题目": ", ".join(final['items']),
-                    })
+        for m_name, payload in confirmed_measures.items():
+            final = payload['final']
+            summary_rows.append({
+                "Measure": m_name,
+                "采用标准": payload.get('stage_label', '-'),
+                "保留题目数": final['n_items'],
+                "CFI": f"{final['cfi']:.3f}" if not np.isnan(final['cfi']) else "N/A",
+                "TLI": f"{final['tli']:.3f}" if not np.isnan(final['tli']) else "N/A",
+                "RMSEA": f"{final['rmsea']:.3f}" if not np.isnan(final['rmsea']) else "N/A",
+                "SRMR": f"{final['srmr']:.3f}" if not np.isnan(final['srmr']) else "N/A",
+                "保留题目": ", ".join(final['items']),
+            })
         
-        if summary_rows:
-            summary_df = pd.DataFrame(summary_rows)
-            st.dataframe(summary_df, use_container_width=True, hide_index=True)
-            
-            # 可展开查看详情
-            with st.expander("🔍 查看各量表保留的题目详情", expanded=False):
-                for row in summary_rows:
-                    st.markdown(f"**{row['Measure']}**（{row['采用标准']}，{row['保留题目数']} 题）")
-                    st.caption(row['保留题目'])
-        else:
-            st.info("暂无已确认的量表。请在上方选择采用的标准。")
+        summary_df = pd.DataFrame(summary_rows)
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+        with st.expander("🔍 查看各量表保留的题目详情", expanded=False):
+            for row in summary_rows:
+                st.markdown(f"**{row['Measure']}**（{row['采用标准']}，{row['保留题目数']} 题）")
+                st.caption(row['保留题目'])
+
+
 
 
 
