@@ -2954,7 +2954,7 @@ def render_batch_cfa():
                         for i, c in enumerate(used_cols):
                             item_num, item_text = _extract_item_num_and_text(c)
                             formula_items_rows.append({
-                                "measure_id": formula_measure_id,
+                                "measure_id": mid,
                                 "item_col": str(c),
                                 "item_text": item_text,
                                 "item_num": item_num,
