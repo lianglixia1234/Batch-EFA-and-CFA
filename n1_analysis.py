@@ -2016,6 +2016,22 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         user_name = st.session_state.get("user_name", "unknown_user")
         safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
         filename = f"{safe_mid}_precfa_report_{today}.xlsx"
+        st.session_state.n2_report_sheet_items_preview = sheet_items.copy()
+        st.session_state.n2_report_cov_preview = cov_matrix.copy()
+
+        st.markdown("##### 预览：题目明细表（前20行）")
+        st.dataframe(
+            st.session_state.n2_report_sheet_items_preview.head(20),
+            use_container_width=True,
+        )
+
+        st.markdown("##### 预览：题目协方差矩阵（前20行）")
+        st.dataframe(
+            st.session_state.n2_report_cov_preview.head(20),
+            use_container_width=True,
+        )
+
+        
         st.download_button(
             label="⬇️ 点击下载 Excel 报告",
             data=buf.getvalue(),
