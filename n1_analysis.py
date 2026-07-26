@@ -2279,7 +2279,7 @@ def render_stage3_efa_no_deletion():
                         st.download_button(
                             label=f"⬇️ 下载 【{final_measure_id}】 维度的 最终EFA 报告",
                             data=single_buf.getvalue(),
-                            file_name=f"{safe_measure_id}_finalEFA_report_{today_str}.xlsx",
+                            file_name=f"{safe_measure_id}_EFA_report_{today_str}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             key=f"stage3_dl_btn_{cfa_key}"
                         )
