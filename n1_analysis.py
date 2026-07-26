@@ -1800,7 +1800,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         # st.write(f"DEBUG factor_items: {factor_items}")
 
         
-                for idx, item_clean in enumerate(sorted_items, start=1):
+        for idx, item_clean in enumerate(sorted_items, start=1):
             item_raw = clean_to_orig.get(item_clean, item_clean)
             _, num, text = parse_item_col(item_raw)
             rev = 1 if _is_reverse_coded(item_raw) else 0
