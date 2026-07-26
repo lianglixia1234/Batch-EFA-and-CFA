@@ -1520,66 +1520,64 @@ def render_stage2_cfa_clean():
                 placeholder="如 LQ、EQ",
                 help="此 ID 将作为 N2_preCFA 中的键，并用于报告文件名。"
             )
-            col_btn, _ = st.columns([1, 1])
-            with col_btn:
-                if st.button("✅ 确认结果", key=f"n2_{sub_name}_lock_btn", use_container_width=True):
-                    mid = measure_id_input.strip()
-                    if not mid:
-                        st.warning("请填写 measure_id。")
+            if st.button("✅ 确认结果", key=f"n2_{sub_name}_lock_btn", use_container_width=True):
+                mid = measure_id_input.strip()
+                if not mid:
+                    st.warning("请填写 measure_id。")
+                else:
+                    if final_df_cfa.empty or not final_factor_items:
+                        st.error("❌ 该量表尚未成功运行，请先运行分析。")
                     else:
-                        if final_df_cfa.empty or not final_factor_items:
-                            st.error("❌ 该量表尚未成功运行，请先运行分析。")
-                        else:
-                            if "N2_preCFA" not in st.session_state:
-                                st.session_state["N2_preCFA"] = {}
-                            
-                            clean_to_orig = cfg["clean_to_orig"]
-                            orig_factor_items = [clean_to_orig.get(c, c) for c in final_factor_items]
-                            
-                            # 使用原始数据框（未清洗）提取最终保留的列
-                            raw_df_orig = cfg.get("raw_df", all_upstream_measures[sub_name]["clean_df"])
-                            orig_cols_present = [c for c in orig_factor_items if c in raw_df_orig.columns]
-                            final_raw_df = raw_df_orig[orig_cols_present].copy()
-            
-                            asset_payload = {
-                                "measure_id": mid,
-                                "origin_sub_name": sub_name,
-                                "clean_df": final_raw_df,
-                                "kept_items": orig_factor_items,
-                                "factor_name": fname,
-                                "method_name": mname,
-                                "fit_stats": final_fit,
-                                "estimates": final_estimates,
-                            }
-                            st.session_state["N2_preCFA"][mid] = asset_payload
-            
-                            # ==============================================================
-                            # 🚀 注入资产：把用户在输入框填写的 mid 作为键和内部属性同步带下去
-                            # ==============================================================
-                            if "N1_postCFA" not in st.session_state:
-                                st.session_state["N1_postCFA"] = {}
-                            
-                            st.session_state["N1_postCFA"][sub_name] = {
-                                "kept_items": orig_factor_items,
-                                "clean_df": final_raw_df,
-                                "measure_id_show": mid,          # 🔥 锁定并记录用户填写的 mid
-                                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                            }
-            
-                            st.session_state[f"n2_{sub_name}_measure_id"] = mid
+                        if "N2_preCFA" not in st.session_state:
+                            st.session_state["N2_preCFA"] = {}
+                        
+                        clean_to_orig = cfg["clean_to_orig"]
+                        orig_factor_items = [clean_to_orig.get(c, c) for c in final_factor_items]
+                        
+                        # 使用原始数据框（未清洗）提取最终保留的列
+                        raw_df_orig = cfg.get("raw_df", all_upstream_measures[sub_name]["clean_df"])
+                        orig_cols_present = [c for c in orig_factor_items if c in raw_df_orig.columns]
+                        final_raw_df = raw_df_orig[orig_cols_present].copy()
+        
+                        asset_payload = {
+                            "measure_id": mid,
+                            "origin_sub_name": sub_name,
+                            "clean_df": final_raw_df,
+                            "kept_items": orig_factor_items,
+                            "factor_name": fname,
+                            "method_name": mname,
+                            "fit_stats": final_fit,
+                            "estimates": final_estimates,
+                        }
+                        st.session_state["N2_preCFA"][mid] = asset_payload
+        
+                        # ==============================================================
+                        # 🚀 注入资产：把用户在输入框填写的 mid 作为键和内部属性同步带下去
+                        # ==============================================================
+                        if "N1_postCFA" not in st.session_state:
+                            st.session_state["N1_postCFA"] = {}
+                        
+                        st.session_state["N1_postCFA"][sub_name] = {
+                            "kept_items": orig_factor_items,
+                            "clean_df": final_raw_df,
+                            "measure_id_show": mid,          # 🔥 锁定并记录用户填写的 mid
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                        }
+        
+                        st.session_state[f"n2_{sub_name}_measure_id"] = mid
 
-                            # ---- 下载报告 ----
-                    
-                            _generate_and_download_report(
-                                sub_name=sub_name,
-                                cfg=cfg,
-                                final_df_cfa=final_df_cfa,
-                                final_factor_items=final_factor_items,
-                                final_estimates=final_estimates,
-                                final_fit=final_fit,
-                                fname=fname,
-                                measure_id=st.session_state[f"n2_{sub_name}_measure_id"],
-                            )
+                        # ---- 下载报告 ----
+                
+                        _generate_and_download_report(
+                            sub_name=sub_name,
+                            cfg=cfg,
+                            final_df_cfa=final_df_cfa,
+                            final_factor_items=final_factor_items,
+                            final_estimates=final_estimates,
+                            final_fit=final_fit,
+                            fname=fname,
+                            measure_id=st.session_state[f"n2_{sub_name}_measure_id"],
+                        )
 
 
 # =============================================================================
