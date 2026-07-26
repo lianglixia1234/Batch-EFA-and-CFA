@@ -1797,221 +1797,18 @@ def render_single_cfa():
                             else:
                                 st.error(f"保存失败: {msg}")
 
-#+++++++++++++++++=+++++++++++++++++++++++++++++++++++++++++++++++++++++
+
 
 # ==============================================================================
 # 批量自动删题CFA核心算法
 # ==============================================================================
 
-# ==============================================================================
-# 批量自动删题CFA核心算法（插入到 run_cfa_gui 之后）
-# ==============================================================================
-
-def _try_delete_each_item(df, factor_name, current_items, method_name, method_items):
-    """尝试删除当前题目集合中的每一个题目，返回所有测试结果。"""
-    results = []
-    for item in current_items:
-        test_items = [i for i in current_items if i != item]
-        if not test_items:
-            continue
-        result, err_msg, syntax = run_cfa_gui(
-            df, factor_name, test_items, method_name, method_items
-        )
-        if err_msg:
-            continue
-        model_obj, estimates, fit_stats = result
-        cfi = fit_stats.get('CFI', np.nan)
-        tli = fit_stats.get('TLI', np.nan)
-        rmsea = fit_stats.get('RMSEA', np.nan)
-        srmr = fit_stats.get('SRMR', np.nan)
-        results.append({
-            'deleted_item': item,
-            'cfi': cfi,
-            'tli': tli,
-            'rmsea': rmsea,
-            'srmr': srmr,
-            'n_items': len(test_items),
-            'items': list(test_items),
-            'result': result,
-            'syntax': syntax,
-            'estimates': estimates,
-        })
-    return results
 
 
-def _score_deletion_candidate(r, current_cfi, current_tli, target_cfi, target_tli):
-    """评分函数：分数越高越值得删除。"""
-    cfi = r['cfi']
-    tli = r['tli']
-    if np.isnan(cfi) or np.isnan(tli):
-        return -9999
-    
-    cfi_gap_before = max(0, target_cfi - current_cfi)
-    tli_gap_before = max(0, target_tli - current_tli)
-    cfi_gap_after = max(0, target_cfi - cfi)
-    tli_gap_after = max(0, target_tli - tli)
-    
-    if cfi >= target_cfi and tli >= target_tli:
-        return 5000 + cfi * 100 + tli * 100
-    
-    improvement = (cfi_gap_before + tli_gap_before) - (cfi_gap_after + tli_gap_after)
-    
-    if improvement < 0:
-        if (current_cfi >= target_cfi and current_tli >= target_tli and 
-            cfi >= target_cfi and tli >= target_tli):
-            return 1000 + cfi * 10 + tli * 10
-        return improvement - 100
-    
-    return improvement * 100 + cfi * 10 + tli * 10
 
 
-def auto_delete_loop(
-    df, factor_name, initial_items, method_name, method_items,
-    target_cfi, target_tli, min_items=5, stage_name="Stage",
-    stop_if_target_met_and_n_le_target=None,
-):
-    """通用自动删题循环。"""
-    current_items = list(initial_items)
-    history = []
-    
-    result, err_msg, syntax = run_cfa_gui(
-        df, factor_name, current_items, method_name, method_items
-    )
-    if err_msg:
-        return None, f"[{stage_name}] 初始模型拟合失败: {err_msg}"
-    
-    model_obj, estimates, fit_stats = result
-    current_cfi = fit_stats.get('CFI', np.nan)
-    current_tli = fit_stats.get('TLI', np.nan)
-    current_rmsea = fit_stats.get('RMSEA', np.nan)
-    current_srmr = fit_stats.get('SRMR', np.nan)
-    
-    history.append({
-        'round': 0,
-        'action': '初始模型（全题目）',
-        'deleted_item': None,
-        'items': list(current_items),
-        'n_items': len(current_items),
-        'cfi': current_cfi,
-        'tli': current_tli,
-        'rmsea': current_rmsea,
-        'srmr': current_srmr,
-        'result': result,
-        'syntax': syntax,
-        'estimates': estimates,
-    })
-    
-    if not (np.isnan(current_cfi) or np.isnan(current_tli)):
-        if current_cfi >= target_cfi and current_tli >= target_tli:
-            if stop_if_target_met_and_n_le_target is not None:
-                if len(current_items) <= stop_if_target_met_and_n_le_target:
-                    return history, None
-            else:
-                return history, None
-    
-    round_num = 1
-    while len(current_items) > min_items:
-        test_results = _try_delete_each_item(
-            df, factor_name, current_items, method_name, method_items
-        )
-        if not test_results:
-            break
-        
-        for r in test_results:
-            r['score'] = _score_deletion_candidate(
-                r, current_cfi, current_tli, target_cfi, target_tli
-            )
-        
-        valid_results = [r for r in test_results if r['score'] > -1000]
-        if not valid_results:
-            break
-        
-        valid_results.sort(key=lambda x: x['score'], reverse=True)
-        best = valid_results[0]
-        
-        if best['score'] < 0:
-            if current_cfi >= target_cfi and current_tli >= target_tli:
-                break
-            break
-        
-        current_items = best['items']
-        current_cfi = best['cfi']
-        current_tli = best['tli']
-        current_rmsea = best['rmsea']
-        current_srmr = best['srmr']
-        
-        history.append({
-            'round': round_num,
-            'action': f'删除 {best["deleted_item"]}',
-            'deleted_item': best['deleted_item'],
-            'items': list(current_items),
-            'n_items': len(current_items),
-            'cfi': current_cfi,
-            'tli': current_tli,
-            'rmsea': current_rmsea,
-            'srmr': current_srmr,
-            'result': best['result'],
-            'syntax': best['syntax'],
-            'estimates': best['estimates'],
-        })
-        
-        if not (np.isnan(current_cfi) or np.isnan(current_tli)):
-            if current_cfi >= target_cfi and current_tli >= target_tli:
-                if stop_if_target_met_and_n_le_target is not None:
-                    if len(current_items) <= stop_if_target_met_and_n_le_target:
-                        break
-                else:
-                    break
-        
-        round_num += 1
-    
-    return history, None
 
 
-def run_batch_auto_cfa(df, measures_config, min_items=5, target_n=10):
-    """批量运行自动删题CFA。返回 {measure_name: {'stage1': history, 'stage2': history, 'error': msg}}"""
-    results = {}
-    for measure_name, config in measures_config.items():
-        items = config.get('items', [])
-        method_items = config.get('method_items', [])
-        factor_name = config.get('factor_name', measure_name)
-        
-        if not items:
-            results[measure_name] = {'stage1': None, 'stage2': None, 'error': '题目列表为空'}
-            continue
-        
-        # Stage 1: 保质量 (CFI >= 0.90, TLI >= 0.90)
-        stage1_history, stage1_err = auto_delete_loop(
-            df, factor_name, items, 'Method', method_items,
-            target_cfi=0.90, target_tli=0.90, min_items=min_items,
-            stage_name=f"{measure_name} Stage 1",
-        )
-        
-        if stage1_err:
-            results[measure_name] = {'stage1': stage1_history, 'stage2': None, 'error': stage1_err}
-            continue
-        
-        # Stage 2: 从 Stage 1 最终题目开始，求精简 (CFI >= 0.95, TLI >= 0.95)
-        stage1_final = stage1_history[-1] if stage1_history else None
-        if stage1_final is None:
-            results[measure_name] = {'stage1': stage1_history, 'stage2': None, 'error': 'Stage 1 无有效结果'}
-            continue
-        
-        stage1_items = stage1_final['items']
-        stage2_history, stage2_err = auto_delete_loop(
-            df, factor_name, stage1_items, 'Method', method_items,
-            target_cfi=0.95, target_tli=0.95, min_items=min_items,
-            stage_name=f"{measure_name} Stage 2",
-            stop_if_target_met_and_n_le_target=target_n,
-        )
-        
-        results[measure_name] = {'stage1': stage1_history, 'stage2': stage2_history, 'error': stage2_err}
-    
-    return results
-
-# ==============================================================================
-# 批量自动删题CFA页面
-# ==============================================================================
 
 # ==============================================================================
 # 批量自动删题CFA页面
@@ -2039,7 +1836,7 @@ def render_batch_cfa():
 #————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————-——
 def render_singlefactor_cfa():
     # 模式选择：单模型 or 批量
-    mode = st.radio("运行模式", ["单模型 CFA", "批量自动删题 CFA"], horizontal=True)
+    mode = st.radio("运行模式", ["单measure CFA", "批量自动删题 CFA"], horizontal=True)
     
     if mode == "批量自动删题 CFA":
         render_batch_cfa()
