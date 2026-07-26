@@ -1512,13 +1512,13 @@ def render_stage2_cfa_clean():
 
             # ---- 确认锁定 ----
             st.markdown("---")
-            st.markdown("##### 🔒 确认锁定结果至 N2_preCFA（供后续 Final EFA 使用）")
+            st.markdown("##### 🔒 确认锁定结果至 preCFA（供后续 Final EFA 使用）")
             measure_id_input = st.text_input(
                 "量表 measure_id（唯一编码）",
                 value=(st.session_state.get(f"n2_{sub_name}_measure_id") or sub_name),
                 key=f"n2_{sub_name}_measure_id_input",
                 placeholder="如 LQ、EQ",
-                help="此 ID 将作为 N2_preCFA 中的键，并用于报告文件名。"
+                help="此 ID 将作为 preCFA 中的键，并用于报告文件名。"
             )
             if st.button("✅ 确认结果", key=f"n2_{sub_name}_lock_btn", use_container_width=True):
                 mid = measure_id_input.strip()
