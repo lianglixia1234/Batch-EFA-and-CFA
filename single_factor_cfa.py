@@ -196,7 +196,7 @@ def run_cfa_gui(df, factor_name, factor_items, method_name, method_items):
 # 页面渲染逻辑
 # ==============================================================================
 
-def render_singlefactor_cfa():
+def render_single_cfa():
 
     # --- 1. 数据来源 ---
     st.sidebar.markdown("### 数据来源设置")
@@ -1796,3 +1796,13 @@ def render_singlefactor_cfa():
                                 st.success(msg)
                             else:
                                 st.error(f"保存失败: {msg}")
+
+
+def render_singlefactor_cfa():
+    # 模式选择：单模型 or 批量
+    mode = st.radio("运行模式", ["单模型 CFA", "批量自动删题 CFA"], horizontal=True)
+    
+    if mode == "批量自动删题 CFA":
+        render_batch_cfa()
+    else:
+        render_single_cfa()  # 原有代码
