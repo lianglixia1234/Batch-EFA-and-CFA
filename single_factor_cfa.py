@@ -1142,6 +1142,13 @@ def render_single_cfa():
             _n2_smin = int(st.session_state.get("n2_scale_min", 1))
             _n2_smax = int(st.session_state.get("n2_scale_max", 7))
             st.caption(f"公式参数将使用**上方** scale_min / scale_max（当前为 [{_n2_smin}, {_n2_smax}]）。measure_id 沿用上方统一填写的值。若非 1–7 量表，请先在上方修改后再生成。")
+            measuregroup_title_input = st.text_input(
+                "measuregroup_title（量表组标题，如：奖励与动机、认知等）",
+                value=st.session_state.get(f"batch_measuregroup_title_{m_name}", ""),
+                key=f"batch_measuregroup_title_{m_name}",
+                placeholder="请输入该量表所属的组标题（可为空）"
+            )
+            
             if st.button("生成公式参数表", key="n2_btn_build_formula_table"):
                 try:
                     formula_scale_min = int(st.session_state.get("n2_scale_min", 1))
@@ -1245,7 +1252,7 @@ def render_single_cfa():
                         or st.session_state.get("n2_selected_dataset")
                         or "n2_dataset"
                     )
-                    measuregroup_title = str(st.session_state.get("n3_measuregroup_title", "") or "").strip()
+                    measuregroup_title = str(st.session_state.get(f"batch_measuregroup_title_{m_name}", "") or "").strip()
                     created_date = date.today().strftime("%Y-%m-%d")
                     formula_measure_id = (st.session_state.get("n2_measure_id") or "").strip() or "measure"
                     # 方案 A：formula_measure（1 行）+ formula_items（N 行）
@@ -2963,6 +2970,14 @@ def render_batch_cfa():
                 st.markdown("##### 📤 导出最终得分公式参数表")
                 st.caption("导出部署时使用的线性公式参数：FinalScore = intercept + Σ(beta * item)")
                 st.caption(f"公式参数将使用上方 scale_min / scale_max（当前为 [{int(n2_scale_min)}, {int(n2_scale_max)}]）。")
+
+
+                measuregroup_title_input = st.text_input(
+                    "measuregroup_title（复杂问卷标题，如：奖励与动机、认知等）",
+                    value=st.session_state.get(f"batch_measuregroup_title_{m_name}", ""),
+                    key=f"batch_measuregroup_title_{m_name}",
+                    placeholder="请输入该量表所属的组标题（可为空）"
+                )
                 
                 if st.button(f"📤 生成公式参数表", key=f"batch_gen_formula_{m_name}"):
                     try:
@@ -3070,7 +3085,7 @@ def render_batch_cfa():
                         else:
                             dataset_name = "CFA dataset"
                         
-                        measuregroup_title = str(st.session_state.get("n3_measuregroup_title", "") or "").strip()
+                        measuregroup_title = str(st.session_state.get(f"batch_measuregroup_title_{m_name}", "") or "").strip()
                         created_date = date.today().strftime("%Y-%m-%d")
                         formula_measure_id = str(mid).strip() or "measure"
                         
