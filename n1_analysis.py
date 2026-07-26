@@ -1947,6 +1947,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 "item_mean": df_cfa[item_clean].mean() if item_clean in df_cfa.columns else np.nan,
                 "item_sd": df_cfa[item_clean].std() if item_clean in df_cfa.columns else np.nan,
                 "cronbach_alpha": alpha_val,
+                "Composite Reliability (CR)": cr_val,
             })
             
             
