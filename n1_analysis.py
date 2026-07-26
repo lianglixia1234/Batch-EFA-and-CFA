@@ -1811,9 +1811,9 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         # ============================================================
         # 4. 调试输出
         # ============================================================
-        st.write(f"🛠️ DEBUG: 因子名='{fname}' | trait_var={trait_var}")
-        st.write(f"🛠️ DEBUG: 提取到 {len(loadings_unstd)} 个载荷")
-        st.write(f"🛠️ DEBUG: 载荷前缀样例 = {[_get_prefix_num(k) for k in list(loadings_unstd.keys())[:5]]}")
+        # st.write(f"🛠️ DEBUG: 因子名='{fname}' | trait_var={trait_var}")
+        # st.write(f"🛠️ DEBUG: 提取到 {len(loadings_unstd)} 个载荷")
+        # st.write(f"🛠️ DEBUG: 载荷前缀样例 = {[_get_prefix_num(k) for k in list(loadings_unstd.keys())[:5]]}")
 
         # ============================================================
         # 5. 拟合指标提取
