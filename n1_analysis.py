@@ -2101,7 +2101,7 @@ def render_stage3_efa_no_deletion():
     selected_cfa_keys = st.multiselect(
         "📂 请选择要进行不删题 EFA 分析的量表：",
         options=list(all_cfa_measures.keys()),
-        default=list(all_cfa_measures.keys())
+        default=list(all_cfa_measures.keys()),
         key="stage3_multiselect_cfa_keys"
     )
 
