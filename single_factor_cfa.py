@@ -2116,6 +2116,8 @@ def render_batch_cfa():
             num_cols = df_num.columns.tolist()
             if num_cols:
                 available_measures[ds_name] = {'df': df_num, 'items': num_cols}
+                
+        st.session_state.batch_data_source_type = "sub"
     
     # ---------- 分支 B：四数据集 ----------
     elif data_source == "💾 来自 Data Cleaning（四数据集）":
@@ -2133,7 +2135,6 @@ def render_batch_cfa():
         )
 
 
-        
         measure_names = list(st.session_state.dc_measures.keys())
         if not measure_names:
             st.warning("请在数据清洗模块的「Measure 划分」中至少定义一个 Measure。")
@@ -2174,6 +2175,9 @@ def render_batch_cfa():
                 if not df_m.empty:
                     available_measures[m_name] = {'df': df_m, 'items': df_m.columns.tolist()}
 
+        st.session_state.batch_data_source_type = "dual"
+        st.session_state.batch_selected_dual_dataset = selected_dataset
+        
     if not available_measures:
         st.error("所选数据源中没有有效的数值列。")
         return
@@ -3036,11 +3040,11 @@ def render_batch_cfa():
                         intercept_abs = float(-(100.0 / den_abs) * s_min)
                         
                         # 构建公式表（与原始代码完全一致的结构）
-                        dataset_name = (
-                            st.session_state.get("n2_dual_dataset")
-                            or st.session_state.get("n2_selected_dataset")
-                            or "batch_dataset"
-                        )
+                        if st.session_state.get("batch_data_source_type") == "dual":
+                            dataset_name = st.session_state.get("batch_selected_dual_dataset", "CFA dataset")
+                        else:
+                            dataset_name = "CFA dataset"
+                        
                         measuregroup_title = str(st.session_state.get("n3_measuregroup_title", "") or "").strip()
                         created_date = date.today().strftime("%Y-%m-%d")
                         formula_measure_id = str(mid).strip() or "measure"
