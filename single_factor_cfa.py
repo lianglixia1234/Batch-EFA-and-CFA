@@ -1804,10 +1804,243 @@ def render_single_cfa():
 # ==============================================================================
 
 
+# ==============================================================================
+# 批量自动删题CFA核心算法（两阶段）
+# ==============================================================================
+
+def _extract_fit_val(fit_stats, key):
+    """从fit_stats中提取指标值（兼容dict和DataFrame）"""
+    if isinstance(fit_stats, dict):
+        return fit_stats.get(key, np.nan)
+    elif isinstance(fit_stats, pd.DataFrame):
+        for col in fit_stats.columns:
+            if fit_stats[col].dtype == object:
+                rows = fit_stats[fit_stats[col].astype(str).str.upper() == key.upper()]
+                if not rows.empty:
+                    val_cols = [c for c in fit_stats.columns if c != col]
+                    try:
+                        return float(rows[val_cols[0]].values[0])
+                    except:
+                        pass
+    return np.nan
 
 
+def _run_cfa_and_extract(df, factor_name, factor_items, method_name, method_items):
+    """运行CFA并提取关键指标，返回统一格式的结果字典"""
+    result, err_msg, syntax = run_cfa_gui(df, factor_name, factor_items, method_name, method_items)
+    if err_msg:
+        return None, err_msg
+    
+    model_obj, estimates, fit_stats = result
+    cfi = _extract_fit_val(fit_stats, "CFI")
+    tli = _extract_fit_val(fit_stats, "TLI")
+    rmsea = _extract_fit_val(fit_stats, "RMSEA")
+    srmr = _extract_fit_val(fit_stats, "SRMR")
+    
+    return {
+        'result': result,
+        'estimates': estimates,
+        'fit_stats': fit_stats,
+        'syntax': syntax,
+        'cfi': cfi,
+        'tli': tli,
+        'rmsea': rmsea,
+        'srmr': srmr,
+        'n_items': len(factor_items),
+        'items': list(factor_items),
+    }, None
 
 
+def _try_all_deletions(df, factor_name, current_items, method_name, method_items, min_items):
+    """尝试删除每一个题目，返回所有有效结果"""
+    results = []
+    for item in current_items:
+        test_items = [i for i in current_items if i != item]
+        if len(test_items) < min_items:
+            continue
+        test_method = [m for m in method_items if m != item]
+        res, err = _run_cfa_and_extract(df, factor_name, test_items, method_name, test_method)
+        if err:
+            continue
+        res['deleted_item'] = item
+        results.append(res)
+    return results
+
+
+def _score_for_stage1(r, current_cfi, current_tli):
+    """Stage 1评分：优先保质量（0.90）"""
+    cfi, tli = r['cfi'], r['tli']
+    if np.isnan(cfi) or np.isnan(tli):
+        return -9999
+    if cfi >= 0.90 and tli >= 0.90:
+        return 10000 + cfi * 100 + tli * 100 - r['n_items'] * 10
+    gap_before = max(0, 0.90 - current_cfi) + max(0, 0.90 - current_tli)
+    gap_after = max(0, 0.90 - cfi) + max(0, 0.90 - tli)
+    improvement = gap_before - gap_after
+    if improvement <= 0 and (current_cfi < 0.90 or current_tli < 0.90):
+        return improvement * 100 - 500
+    return improvement * 1000 + cfi * 10 + tli * 10
+
+
+def _score_for_stage2(r, current_cfi, current_tli):
+    """Stage 2评分：优先求精简（0.95），但不能破坏0.90底线"""
+    cfi, tli = r['cfi'], r['tli']
+    if np.isnan(cfi) or np.isnan(tli):
+        return -9999
+    if cfi < 0.90 or tli < 0.90:
+        return -9999
+    if cfi >= 0.95 and tli >= 0.95:
+        return 10000 + cfi * 100 + tli * 100 - r['n_items'] * 50
+    gap_before = max(0, 0.95 - current_cfi) + max(0, 0.95 - current_tli)
+    gap_after = max(0, 0.95 - cfi) + max(0, 0.95 - tli)
+    improvement = gap_before - gap_after
+    if improvement <= 0 and (current_cfi >= 0.95 and current_tli >= 0.95):
+        return -1000
+    return improvement * 1000 + cfi * 10 + tli * 10
+
+
+def run_auto_cfa_two_stages(df_clean, factor_name, method_name, 
+                             factor_items, method_items, 
+                             min_items_limit=5, target_n=10):
+    """
+    两阶段自动删题CFA。
+    返回: {
+        'stage1': {'history': [...], 'final': result_dict},
+        'stage2': {'history': [...], 'final': result_dict},
+        'error': None or str
+    }
+    """
+    all_cols = list(dict.fromkeys(list(factor_items) + list(method_items)))
+    df_sub = df_clean[all_cols].dropna(axis=0, how='any').copy()
+    if len(df_sub) < 10:
+        return {'stage1': None, 'stage2': None, 'error': "有效样本量不足（<10）"}
+    
+    # ==================== Stage 1: 保质量 ====================
+    s1_items = list(factor_items)
+    s1_method = list(method_items)
+    s1_history = []
+    
+    res, err = _run_cfa_and_extract(df_sub, factor_name, s1_items, method_name, s1_method)
+    if err:
+        return {'stage1': None, 'stage2': None, 'error': f"Stage 1 初始模型失败: {err}"}
+    
+    s1_history.append({
+        'round': 0, 'action': '初始模型（全题目）', 'deleted_item': None,
+        'items': list(s1_items), 'n_items': res['n_items'],
+        'cfi': res['cfi'], 'tli': res['tli'], 'rmsea': res['rmsea'], 'srmr': res['srmr'],
+        'result': res['result'], 'estimates': res['estimates'], 'syntax': res['syntax'],
+    })
+    
+    best_overall = res
+    best_score = res['cfi'] + res['tli']
+    
+    if not (res['cfi'] >= 0.90 and res['tli'] >= 0.90):
+        round_num = 1
+        while len(s1_items) > min_items_limit and round_num <= 30:
+            test_results = _try_all_deletions(
+                df_sub, factor_name, s1_items, method_name, s1_method, min_items_limit
+            )
+            if not test_results:
+                break
+            for r in test_results:
+                r['score'] = _score_for_stage1(r, res['cfi'], res['tli'])
+            valid = [r for r in test_results if r['score'] > -1000]
+            if not valid:
+                break
+            valid.sort(key=lambda x: x['score'], reverse=True)
+            best = valid[0]
+            if best['score'] < 0 and (res['cfi'] < 0.90 or res['tli'] < 0.90):
+                break
+            s1_items = best['items']
+            s1_method = [m for m in s1_method if m in s1_items]
+            res = best
+            s1_history.append({
+                'round': round_num, 'action': f'删除 {best["deleted_item"]}', 
+                'deleted_item': best['deleted_item'],
+                'items': list(s1_items), 'n_items': best['n_items'],
+                'cfi': best['cfi'], 'tli': best['tli'], 
+                'rmsea': best['rmsea'], 'srmr': best['srmr'],
+                'result': best['result'], 'estimates': best['estimates'], 
+                'syntax': best['syntax'],
+            })
+            if best['cfi'] + best['tli'] > best_score:
+                best_score = best['cfi'] + best['tli']
+                best_overall = best
+            if best['cfi'] >= 0.90 and best['tli'] >= 0.90:
+                break
+            round_num += 1
+    
+    stage1_final = best_overall
+    
+    # ==================== Stage 2: 求精简 ====================
+    s2_items = list(stage1_final['items'])
+    s2_method = [m for m in s1_method if m in s2_items]
+    s2_history = []
+    
+    res2, err2 = _run_cfa_and_extract(df_sub, factor_name, s2_items, method_name, s2_method)
+    if err2:
+        return {
+            'stage1': {'history': s1_history, 'final': stage1_final},
+            'stage2': {'history': [], 'final': None},
+            'error': f"Stage 2 初始模型失败: {err2}"
+        }
+    
+    s2_history.append({
+        'round': 0, 'action': '承接 Stage 1 最终题目', 'deleted_item': None,
+        'items': list(s2_items), 'n_items': res2['n_items'],
+        'cfi': res2['cfi'], 'tli': res2['tli'], 'rmsea': res2['rmsea'], 'srmr': res2['srmr'],
+        'result': res2['result'], 'estimates': res2['estimates'], 'syntax': res2['syntax'],
+    })
+    
+    best_overall2 = res2
+    best_score2 = res2['cfi'] + res2['tli']
+    
+    already_high = res2['cfi'] >= 0.95 and res2['tli'] >= 0.95
+    already_compact = res2['n_items'] <= target_n
+    
+    if not (already_high or already_compact):
+        round_num = 1
+        while len(s2_items) > min_items_limit and round_num <= 30:
+            test_results = _try_all_deletions(
+                df_sub, factor_name, s2_items, method_name, s2_method, min_items_limit
+            )
+            if not test_results:
+                break
+            for r in test_results:
+                r['score'] = _score_for_stage2(r, res2['cfi'], res2['tli'])
+            valid = [r for r in test_results if r['score'] > -1000]
+            if not valid:
+                break
+            valid.sort(key=lambda x: x['score'], reverse=True)
+            best = valid[0]
+            if best['score'] < 0:
+                break
+            s2_items = best['items']
+            s2_method = [m for m in s2_method if m in s2_items]
+            res2 = best
+            s2_history.append({
+                'round': round_num, 'action': f'删除 {best["deleted_item"]}',
+                'deleted_item': best['deleted_item'],
+                'items': list(s2_items), 'n_items': best['n_items'],
+                'cfi': best['cfi'], 'tli': best['tli'],
+                'rmsea': best['rmsea'], 'srmr': best['srmr'],
+                'result': best['result'], 'estimates': best['estimates'],
+                'syntax': best['syntax'],
+            })
+            if best['cfi'] + best['tli'] > best_score2:
+                best_score2 = best['cfi'] + best['tli']
+                best_overall2 = best
+            if (best['cfi'] >= 0.95 and best['tli'] >= 0.95) or best['n_items'] <= target_n:
+                break
+            round_num += 1
+    
+    stage2_final = best_overall2
+    
+    return {
+        'stage1': {'history': s1_history, 'final': stage1_final},
+        'stage2': {'history': s2_history, 'final': stage2_final},
+        'error': None,
+    }
 
 
 # ==============================================================================
@@ -1815,11 +2048,465 @@ def render_single_cfa():
 # ==============================================================================
 
 def render_batch_cfa():
+    st.header("🔬 批量自动删题 Single-Factor CFA")
     st.markdown("""
-    本模块支持批量运行多个 Measure 的自动删题 CFA 分析。
-    - *Stage 1（保质量）*：保证 CFI ≥ 0.90、TLI ≥ 0.90
-    - *Stage 2（求精简）*：追求 CFI ≥ 0.95、TLI ≥ 0.95，同时精简题目数
+    本模块支持从已保存的子数据集中批量运行多个 Measure 的自动删题 CFA 分析。
+    - **Stage 1（保质量）**：保证 CFI ≥ 0.90、TLI ≥ 0.90，未达标自动删题
+    - **Stage 2（求精简）**：追求 CFI ≥ 0.95、TLI ≥ 0.95，同时精简至目标题数
     """)
+
+    # ==========================================================
+    # 1. 数据来源：读取已保存的子数据集
+    # ==========================================================
+    st.subheader("📂 请选择要拉入 CFA 自动优化删题流的量表")
+    
+    has_sub_datasets = 'sub_datasets' in st.session_state and len(st.session_state.sub_datasets) > 0
+    
+    if not has_sub_datasets:
+        st.warning("未检测到已保存的子数据集。请先前往 Data Cleaning 模块保存子数据集。")
+        return
+
+    # 获取所有子数据集，默认全选
+    all_dataset_names = list(st.session_state.sub_datasets.keys())
+    selected_dataset_names = st.multiselect(
+        "选择已保存的子数据集（默认全选）：",
+        options=all_dataset_names,
+        default=all_dataset_names,
+        key="batch_selected_datasets"
+    )
+    
+    if not selected_dataset_names:
+        st.warning("请至少选择一个子数据集。")
+        return
+
+    # 构建 measure 映射：每个子数据集 = 一个 measure
+    available_measures = {}
+    for ds_name in selected_dataset_names:
+        df_sub = st.session_state.sub_datasets[ds_name].copy()
+        # 清洗列名
+        df_sub.columns = [re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(c)) for c in df_sub.columns]
+        # 只保留数值列
+        df_num = df_sub.apply(pd.to_numeric, errors='coerce').dropna(axis=1, how='all')
+        num_cols = df_num.columns.tolist()
+        if num_cols:
+            available_measures[ds_name] = {'df': df_num, 'items': num_cols}
+
+    if not available_measures:
+        st.error("所选子数据集中没有有效的数值列。")
+        return
+
+    st.success(f"已加载 **{len(available_measures)}** 个量表，共 **{sum(len(v['items']) for v in available_measures.values())}** 道题目。")
+
+    # ==========================================================
+    # 2. 全局参数设置
+    # ==========================================================
+    st.markdown("---")
+    st.subheader("⚙️ 自动删题参数设置")
+    
+    col_p1, col_p2, col_p3 = st.columns(3)
+    with col_p1:
+        min_items = st.number_input(
+            "🛑 最小保留题目底线", min_value=3, max_value=20, value=5, step=1,
+            help="当维度内题目数减少到该值时，算法强制停止删题。", key="batch_min_items"
+        )
+    with col_p2:
+        target_n = st.number_input(
+            "Stage 2 目标题目总数 (N_single)", min_value=3, max_value=50, value=10, step=1,
+            help="Stage 2 达到此题数且拟合达标时停止", key="batch_target_n"
+        )
+    with col_p3:
+        target_reverse = st.number_input(
+            "Stage 2 目标反向题数 (n_single)", min_value=0, max_value=20, value=3, step=1,
+            help="理想保留的反向题数量（当前仅作记录，不强制约束）", key="batch_target_reverse"
+        )
+
+    # ==========================================================
+    # 3. 模型配置（Tab 形式，自动填充）
+    # ==========================================================
+    st.markdown("---")
+    st.subheader("🔧 检查每个量表的模型配置 (Model Configuration)")
+    st.caption("每个 Tab 对应一个量表。主因子名已自动填充为量表名，题目已自动全选，方法因子已按「末尾 r」规则预选。请确认或微调。")
+
+    # 初始化配置缓存
+    if "batch_measures_config" not in st.session_state:
+        st.session_state.batch_measures_config = {}
+
+    # 自动初始化每个量表的配置
+    for m_name in available_measures.keys():
+        if m_name not in st.session_state.batch_measures_config:
+            items = available_measures[m_name]['items']
+            st.session_state.batch_measures_config[m_name] = {
+                'items': items,
+                'factor_name': m_name,
+                'method_items': [c for c in items if _is_reverse_coded(c)],
+            }
+
+    # Tab 显示每个 Measure 的配置
+    measure_names = list(available_measures.keys())
+    measure_tabs = st.tabs([f"📋 {m}" for m in measure_names])
+
+    for idx, m_name in enumerate(measure_names):
+        with measure_tabs[idx]:
+            config = st.session_state.batch_measures_config[m_name]
+            all_items = available_measures[m_name]['items']
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                factor_name = st.text_input(
+                    "主因子名称",
+                    value=config.get('factor_name', m_name),
+                    key=f"batch_factor_name_{m_name}"
+                )
+                st.session_state.batch_measures_config[m_name]['factor_name'] = factor_name
+            
+            with col_b:
+                method_name = st.text_input(
+                    "方法因子名称",
+                    value="Method",
+                    key=f"batch_method_name_{m_name}"
+                )
+
+            # 主因子题目（自动全选，用户可取消）
+            current_items = [c for c in config.get('items', []) if c in all_items]
+            factor_items = smart_multiselect(
+                options=all_items,
+                label=f"选择属于 {m_name} 的题目",
+                key_suffix=f"batch_factor_{m_name}",
+                default_selected=current_items,
+                show_selection_controls=True,
+            )
+            st.session_state.batch_measures_config[m_name]['items'] = list(factor_items)
+
+            # 方法因子题目
+            method_options = list(factor_items) if factor_items else []
+            method_key_suffix = f"batch_method_{m_name}"
+            method_sig_key = f"{method_key_suffix}_options_sig"
+            method_options_sig = tuple(method_options)
+            if st.session_state.get(method_sig_key) != method_options_sig:
+                _reset_smart_multiselect_cache(method_key_suffix)
+                st.session_state[method_sig_key] = method_options_sig
+            
+            default_method = [x for x in method_options if _is_reverse_coded(x)] if method_options else []
+            
+            def _make_reset_callback(m_name_local):
+                def callback():
+                    _reset_smart_multiselect_cache(f"batch_method_{m_name_local}")
+                    items_now = st.session_state.batch_measures_config.get(m_name_local, {}).get('items', [])
+                    st.session_state[f"batch_method_{m_name_local}_options_sig"] = tuple(items_now)
+                return callback
+            
+            st.button(
+                '按「末尾 r」规则重新预选方法因子题目',
+                key=f"batch_btn_reset_method_{m_name}",
+                on_click=_make_reset_callback(m_name)
+            )
+            
+            method_items = smart_multiselect(
+                options=method_options,
+                label=f"选择受到方法因子影响的题目",
+                key_suffix=method_key_suffix,
+                default_selected=default_method,
+                show_selection_controls=True,
+            )
+            st.session_state.batch_measures_config[m_name]['method_items'] = list(method_items)
+
+            st.info(f"📊 **{m_name}**：主因子 **{len(factor_items)}** 题 | 方法因子 **{len(method_items)}** 题 | 主因子名: `{factor_name}`")
+
+    # ==========================================================
+    # 4. 一键批量运行
+    # ==========================================================
+    st.markdown("---")
+    run_col, prelim_col = st.columns([1, 1])
+    with run_col:
+        run_clicked = st.button("🚀 一键确认配置并批量运行自动删题CFA", type="primary", key="batch_run_cfa")
+    with prelim_col:
+        if "batch_prelim" not in st.session_state:
+            st.session_state.batch_prelim = False
+        prelim_checked = st.checkbox(
+            "当前为 preliminary CFA", value=st.session_state.batch_prelim, key="batch_prelim_checkbox"
+        )
+        st.session_state.batch_prelim = prelim_checked
+
+    if run_clicked:
+        # 校验
+        invalid_measures = []
+        for m_name in measure_names:
+            config = st.session_state.batch_measures_config[m_name]
+            if not config.get('items'):
+                invalid_measures.append(m_name)
+        
+        if invalid_measures:
+            st.error(f"❌ 以下量表未选择题目：{', '.join(invalid_measures)}")
+            return
+        
+        # 合并所有量表的数据（列取并集，行取交集）
+        all_cols = set()
+        for m_name in measure_names:
+            all_cols.update(st.session_state.batch_measures_config[m_name]['items'])
+        
+        base_df = None
+        for m_name in measure_names:
+            df_m = available_measures[m_name]['df']
+            if base_df is None:
+                base_df = df_m.copy()
+            else:
+                for col in df_m.columns:
+                    if col not in base_df.columns:
+                        base_df[col] = df_m[col]
+        
+        df_numeric = base_df[list(all_cols)].apply(pd.to_numeric, errors='coerce')
+        df_numeric = df_numeric.dropna(axis=1, how='all')
+        df_numeric = df_numeric.dropna(axis=0, how='any')
+        df_numeric = df_numeric.replace([np.inf, -np.inf], np.nan).dropna()
+        
+        if df_numeric.empty or len(df_numeric) < 10:
+            st.error("合并数据后有效样本量不足 (<10)，无法运行 CFA。")
+            return
+        
+        st.info(f"合并数据：{len(df_numeric)} 行样本 × {len(df_numeric.columns)} 列")
+        
+        # 构建运行配置
+        run_config = {}
+        for m_name in measure_names:
+            items = [c for c in st.session_state.batch_measures_config[m_name]['items'] if c in df_numeric.columns]
+            if items:
+                run_config[m_name] = {
+                    'items': items,
+                    'factor_name': st.session_state.batch_measures_config[m_name]['factor_name'],
+                    'method_items': [c for c in st.session_state.batch_measures_config[m_name]['method_items'] if c in items],
+                }
+        
+        # 执行批量运行
+        batch_results = {}
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        total = len(run_config)
+        for idx, (m_name, cfg) in enumerate(run_config.items()):
+            status_text.markdown(f"⏳ **正在计算 ({idx+1}/{total})**：`{m_name}` 的自动删题CFA...")
+            
+            result = run_auto_cfa_two_stages(
+                df_numeric,
+                cfg['factor_name'],
+                'Method',
+                cfg['items'],
+                cfg['method_items'],
+                min_items_limit=int(min_items),
+                target_n=int(target_n),
+            )
+            batch_results[m_name] = result
+            progress_bar.progress((idx + 1) / total)
+        
+        status_text.success("🎉 所有量表自动删题分析完成！")
+        st.session_state.batch_results = batch_results
+        st.session_state.batch_df_numeric = df_numeric
+        st.session_state.batch_run_config = run_config
+        st.session_state.batch_measure_names = measure_names
+
+    # ==========================================================
+    # 5. 结果展示
+    # ==========================================================
+    if 'batch_results' not in st.session_state:
+        return
+
+    st.markdown("---")
+    st.subheader("📊 各量表分析结果与确认")
+
+    batch_results = st.session_state.batch_results
+    
+    # 初始化确认状态
+    if "batch_adopted_standard" not in st.session_state:
+        st.session_state.batch_adopted_standard = {}  # {m_name: 'stage1' or 'stage2'}
+
+    # 每个量表一个 Tab
+    result_tabs = st.tabs([f"📈 {m}" for m in measure_names])
+
+    for idx, m_name in enumerate(measure_names):
+        with result_tabs[idx]:
+            res = batch_results.get(m_name)
+            if res is None or res.get('error'):
+                st.error(f"❌ `{m_name}` 分析失败：{res.get('error', '未知错误') if res else '无结果'}")
+                continue
+            
+            s1 = res['stage1']
+            s2 = res['stage2']
+            s1_final = s1['final'] if s1 else None
+            s2_final = s2['final'] if s2 else None
+
+            # ---- 两个标准的对比表格 ----
+            st.markdown("##### 📋 两个标准结果对比")
+            
+            compare_data = []
+            if s1_final:
+                compare_data.append({
+                    "标准": "标准1（保质量）",
+                    "题目数": s1_final['n_items'],
+                    "CFI": f"{s1_final['cfi']:.3f}" if not np.isnan(s1_final['cfi']) else "N/A",
+                    "TLI": f"{s1_final['tli']:.3f}" if not np.isnan(s1_final['tli']) else "N/A",
+                    "RMSEA": f"{s1_final['rmsea']:.3f}" if not np.isnan(s1_final['rmsea']) else "N/A",
+                    "SRMR": f"{s1_final['srmr']:.3f}" if not np.isnan(s1_final['srmr']) else "N/A",
+                    "题目列表": ", ".join(s1_final['items'][:10]) + ("..." if len(s1_final['items']) > 10 else ""),
+                })
+            if s2_final:
+                compare_data.append({
+                    "标准": "标准2（求精简）",
+                    "题目数": s2_final['n_items'],
+                    "CFI": f"{s2_final['cfi']:.3f}" if not np.isnan(s2_final['cfi']) else "N/A",
+                    "TLI": f"{s2_final['tli']:.3f}" if not np.isnan(s2_final['tli']) else "N/A",
+                    "RMSEA": f"{s2_final['rmsea']:.3f}" if not np.isnan(s2_final['rmsea']) else "N/A",
+                    "SRMR": f"{s2_final['srmr']:.3f}" if not np.isnan(s2_final['srmr']) else "N/A",
+                    "题目列表": ", ".join(s2_final['items'][:10]) + ("..." if len(s2_final['items']) > 10 else ""),
+                })
+            
+            compare_df = pd.DataFrame(compare_data)
+            st.dataframe(compare_df, use_container_width=True, hide_index=True)
+
+            # ---- 选择采用哪个标准 ----
+            adopt_options = []
+            if s1_final:
+                adopt_options.append("标准1（保质量）")
+            if s2_final:
+                adopt_options.append("标准2（求精简）")
+            
+            current_adopt = st.session_state.batch_adopted_standard.get(m_name)
+            default_idx = 0
+            if current_adopt == 'stage2' and len(adopt_options) > 1:
+                default_idx = 1
+            
+            adopted = st.radio(
+                f"请选择 `{m_name}` 采用的标准：",
+                options=adopt_options,
+                index=default_idx,
+                key=f"batch_adopt_{m_name}",
+                horizontal=True
+            )
+            st.session_state.batch_adopted_standard[m_name] = 'stage1' if '标准1' in adopted else 'stage2'
+
+            # ---- Stage 1 / Stage 2 详细结果（Tabs）----
+            detail_tabs = st.tabs(["标准1（保质量）详情", "标准2（求精简）详情"])
+            
+            for tab_idx, (tab_name, stage_data, stage_key) in enumerate([
+                ("标准1", s1, 'stage1'),
+                ("标准2", s2, 'stage2')
+            ]):
+                with detail_tabs[tab_idx]:
+                    if stage_data is None or stage_data['final'] is None:
+                        st.info("该标准无有效结果。")
+                        continue
+                    
+                    history = stage_data['history']
+                    final = stage_data['final']
+                    
+                    # 删题路径
+                    st.markdown("###### 📝 自动删题路径")
+                    if len(history) > 1:
+                        log_df = pd.DataFrame([
+                            {
+                                '轮次': h['round'],
+                                '操作': h['action'],
+                                '删除题目': h['deleted_item'] or '-',
+                                '剩余题数': h['n_items'],
+                                'CFI': f"{h['cfi']:.3f}" if not np.isnan(h['cfi']) else "N/A",
+                                'TLI': f"{h['tli']:.3f}" if not np.isnan(h['tli']) else "N/A",
+                            }
+                            for h in history
+                        ])
+                        st.dataframe(log_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.write("无删题记录（模型首次即达标）。")
+
+                    # 关键指标卡片
+                    st.markdown("###### 🏆 关键模型拟合指标")
+                    metrics = {
+                        "CFI": final['cfi'], "TLI": final['tli'],
+                        "RMSEA": final['rmsea'], "SRMR": final['srmr'],
+                    }
+                    m_cols = st.columns(4)
+                    for i, (k, v) in enumerate(metrics.items()):
+                        display = f"{v:.3f}" if not np.isnan(v) else "N/A"
+                        m_cols[i].metric(label=k, value=display)
+                    
+                    # 更多指标
+                    fit_stats = final['fit_stats']
+                    more_metrics = {
+                        "Chi-Square (User Model)": _extract_fit_val(fit_stats, 'chi2'),
+                        "AIC": _extract_fit_val(fit_stats, 'AIC'),
+                        "BIC": _extract_fit_val(fit_stats, 'BIC'),
+                        "SABIC": _extract_fit_val(fit_stats, 'SABIC'),
+                    }
+                    m_cols2 = st.columns(4)
+                    for i, (k, v) in enumerate(more_metrics.items()):
+                        display = f"{v:.3f}" if not np.isnan(v) else "N/A"
+                        m_cols2[i].metric(label=k, value=display)
+
+                    # 参数估计表
+                    st.markdown("###### 📄 详细参数估计 (Estimates)")
+                    est_df = final['estimates'].copy()
+                    fname = st.session_state.batch_measures_config[m_name]['factor_name']
+                    mname = "Method"
+                    
+                    def get_sort_rank(row):
+                        lhs, op, rhs = row['LHS'], row['op'], row['RHS']
+                        if op == '=~' and lhs == fname: return 1
+                        if op == '=~' and lhs == mname: return 2
+                        if op == '~~' and lhs == rhs and lhs == fname: return 3
+                        if op == '~~' and lhs == rhs and lhs == mname: return 4
+                        if op == '~~' and lhs == rhs and lhs not in [fname, mname]: return 5
+                        return 6
+                    
+                    est_df['rank'] = est_df.apply(get_sort_rank, axis=1)
+                    est_df = est_df.sort_values('rank').drop(columns=['rank'])
+                    
+                    numeric_cols = est_df.select_dtypes(include=[np.number]).columns
+                    format_dict = {col: "{:.3f}" for col in numeric_cols}
+                    display_cols = ['LHS', 'op', 'RHS', 'Estimate', 'Std.Err', 'z-value', 'P(>|z|)', 'Std.all']
+                    final_cols = [c for c in display_cols if c in est_df.columns]
+                    st.dataframe(est_df[final_cols].style.format(format_dict))
+                    
+                    # 模型语法
+                    with st.expander("查看模型语法"):
+                        st.code(final['syntax'], language="text")
+
+    # ==========================================================
+    # 6. 全局确认清单（底部看板）
+    # ==========================================================
+    st.markdown("---")
+    st.subheader("📋 Single-CFA 确认清单")
+    st.caption("以下展示所有已分析量表的确认状态。请在上方每个量表中选择采用的标准。")
+
+    if not st.session_state.batch_adopted_standard:
+        st.info("💡 暂无确认记录。请先运行分析并在上方各量表标签页中选择采用的标准。")
+    else:
+        summary_rows = []
+        for m_name in measure_names:
+            adopted = st.session_state.batch_adopted_standard.get(m_name)
+            if adopted and m_name in batch_results:
+                res = batch_results[m_name]
+                stage_data = res.get(adopted)
+                if stage_data and stage_data['final']:
+                    final = stage_data['final']
+                    summary_rows.append({
+                        "Measure": m_name,
+                        "采用标准": "标准1（保质量）" if adopted == 'stage1' else "标准2（求精简）",
+                        "保留题目数": final['n_items'],
+                        "CFI": f"{final['cfi']:.3f}" if not np.isnan(final['cfi']) else "N/A",
+                        "TLI": f"{final['tli']:.3f}" if not np.isnan(final['tli']) else "N/A",
+                        "RMSEA": f"{final['rmsea']:.3f}" if not np.isnan(final['rmsea']) else "N/A",
+                        "SRMR": f"{final['srmr']:.3f}" if not np.isnan(final['srmr']) else "N/A",
+                        "保留题目": ", ".join(final['items']),
+                    })
+        
+        if summary_rows:
+            summary_df = pd.DataFrame(summary_rows)
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            
+            # 可展开查看详情
+            with st.expander("🔍 查看各量表保留的题目详情", expanded=False):
+                for row in summary_rows:
+                    st.markdown(f"**{row['Measure']}**（{row['采用标准']}，{row['保留题目数']} 题）")
+                    st.caption(row['保留题目'])
+        else:
+            st.info("暂无已确认的量表。请在上方选择采用的标准。")
 
 
 
