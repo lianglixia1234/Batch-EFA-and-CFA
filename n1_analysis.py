@@ -2213,7 +2213,7 @@ def render_stage3_efa_no_deletion():
                 kept = res["kept"]
                 n_factors = res["n_factors"]
 
-                st.success(f"✅ **当前分析题目 ({len(kept)} 题 :**")
+                st.success(f"✅ **当前分析题目 ({len(kept)} 题 ):**")
                 st.caption(", ".join(kept))
 
                 # 5.1 KMO 与 Bartlett
