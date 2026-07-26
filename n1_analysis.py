@@ -2097,10 +2097,11 @@ def render_stage3_efa_no_deletion():
     # 2. 选择要处理的 CFA 后量表 & 全局参数
     # ==========================================================================
     st.markdown("---")
-    st.markdown("### 🔍 第一步：勾选您本次需要执行终期 EFA 验证的量表")
+    st.markdown("### 🔍 勾选需要执行最终 EFA 分析的量表")
     selected_cfa_keys = st.multiselect(
         "📂 请选择要进行不删题 EFA 分析的量表：",
         options=list(all_cfa_measures.keys()),
+        default=list(all_cfa_measures.keys())
         key="stage3_multiselect_cfa_keys"
     )
 
@@ -2141,7 +2142,7 @@ def render_stage3_efa_no_deletion():
     # ==========================================================================
     # 4. 执行批量全自动管道循环 (不删题验证版)
     # ==========================================================================
-    if st.button("🚀 开始运行选定 CFA 量表的不删题 EFA", type="primary", use_container_width=True):
+    if st.button("🚀 开始运行不删题 EFA", type="primary", use_container_width=True):
         batch_results = {}
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -2188,7 +2189,7 @@ def render_stage3_efa_no_deletion():
     # ==========================================================================
     if st.session_state.batch_n1_no_del_results:
         st.markdown("---")
-        st.subheader("📥 最终结果审查与导出")
+        st.subheader("📥 最终结果")
 
         active_keys = list(st.session_state.batch_n1_no_del_results.keys())
         tabs = st.tabs(active_keys)
@@ -2202,7 +2203,7 @@ def render_stage3_efa_no_deletion():
             default_show_name = all_cfa_measures[cfa_key]["measure_id_show"]
             
             with tabs[i]:
-                st.markdown(f"### 📋 终审原始维度: {cfa_key}")
+                # st.markdown(f"### 📋 终审原始维度: {cfa_key}")
                 if not res["success"]:
                     st.error(f"❌ 分析失败，核心原因: {res['error_msg']}")
                     continue
@@ -2212,7 +2213,7 @@ def render_stage3_efa_no_deletion():
                 kept = res["kept"]
                 n_factors = res["n_factors"]
 
-                st.success(f"✅ **当前全量保留分析题目数 ({len(kept)} 题 - 完全对应 CFA 筛选结果):**")
+                st.success(f"✅ **当前分析题目 ({len(kept)} 题 :**")
                 st.caption(", ".join(kept))
 
                 # 5.1 KMO 与 Bartlett
