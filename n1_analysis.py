@@ -728,7 +728,7 @@ def render_stage1_efa_clean():
     # 3. 全局统一参数配置面板
     # ==========================================================================
     st.markdown("---")
-    st.subheader("⚙️ 批量分析因子数设置")
+    st.subheader("⚙️ 因子数设置")
     
     c_p1, c_p2 = st.columns(2)
     with c_p1:
@@ -746,14 +746,14 @@ def render_stage1_efa_clean():
     if "batch_n1_results" not in st.session_state:
         st.session_state.batch_n1_results = {}
 
-    st.markdown(f"**📋 待分析问卷任务队列 (共 {len(cleaned_measures_dict)} 个):**")
+    st.markdown(f"**📋 待分析问卷 (共 {len(cleaned_measures_dict)} 个):**")
     for m_name, df_ready in cleaned_measures_dict.items():
         st.caption(f" └─ `维度名: {m_name}` ── 样本行数: `{df_ready.shape[0]}` | 初始题目数: `{df_ready.shape[1]}`")
 
     # ==========================================================================
     # 4. 执行批量全自动管道循环
     # ==========================================================================
-    if st.button("🚀 开始运行所有选定 Measure 的自动化批量 EFA", type="primary", use_container_width=True):
+    if st.button("🚀 开始运行所有选定 Measure 的删题 EFA", type="primary", use_container_width=True):
         batch_results = {}
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -798,7 +798,7 @@ def render_stage1_efa_clean():
     # ==========================================================================
     if st.session_state.batch_n1_results:
         st.markdown("---")
-        st.subheader("📥 批量结果确认")
+        st.subheader("📥 结果确认")
         st.info("💡 切换下方的问卷标签页（Tabs），可以独立审查并单独下载每个维度对应的独立 Excel 报告。")
 
         active_tab_names = list(st.session_state.batch_n1_results.keys())
@@ -812,7 +812,7 @@ def render_stage1_efa_clean():
             res = st.session_state.batch_n1_results[m_name]
             
             with tabs[i]:
-                st.markdown(f"### 📋 任务维度: {m_name}")
+                st.markdown(f"### 📋  {m_name}")
                 if not res["success"]:
                     st.error(f"❌ 问卷分析由于数学边界或奇异矩阵崩溃，核心错误原因: {res['error_msg']}")
                     continue
@@ -909,7 +909,7 @@ def render_stage1_efa_clean():
                 # ==============================================================
                 # 🚨 【核心升级点 1】：解耦并拆分 复合 Key，将状态稳稳存入 N1_preEFA 缓存
                 # ==============================================================
-                st.markdown("#### 4️⃣ 独立导出与确认")
+                st.markdown("#### 4️⃣ 独立导出")
                 
                 # 智能识别当前复合键中包含的「数据集名称」和「Measure名称」
                 # 格式预期: "子数据集A - 心理资本"，如无分隔符则兜底归类
@@ -1292,7 +1292,7 @@ def render_stage2_cfa_clean():
     # 3. 配置因子结构（每个量表一个标签页）
     # ==========================================================================
     st.markdown("---")
-    st.markdown("### 🛠️ CFA 测量模型结构核对")
+    st.markdown("### 🛠️ 模型结构核对")
     st.caption("请依次进入每个量表的标签页，核对或调整其因子结构配置。")
 
     cfa_ready_queue = {}
@@ -1586,7 +1586,7 @@ def render_stage2_cfa_clean():
     # ==========================================================================
     st.markdown("---")
     st.subheader("📋 preCFA 确认清单")
-    st.caption("以下展示所有已点击「✅ 确认结果」并锁定至 N2_preCFA 的量表。如需修改某个量表，请回到上方对应标签页重新点击确认。")
+    st.caption("以下展示所有已点击「✅ 确认结果」并锁定至 N1_preCFA 的量表。如需修改某个量表，请回到上方对应标签页重新点击确认。")
 
     n2_precfa = st.session_state.get("N2_preCFA", {})
     
@@ -2117,7 +2117,7 @@ def render_stage3_efa_no_deletion():
     # 3. 全局统一参数配置面板
     # ==========================================================================
     st.markdown("---")
-    st.subheader("⚙️ 批量分析因子数设置")
+    st.subheader("⚙️ 因子数设置")
     
     c_p1, c_p2 = st.columns(2)
     with c_p1:
@@ -2255,7 +2255,7 @@ def render_stage3_efa_no_deletion():
 
                 
                 # 5.4 终期改名与保存归档
-                st.markdown("#### 4️⃣ 独立导出与确认")
+                st.markdown("#### 4️⃣ 独立导出")
                 
                 final_measure_id = st.text_input(
                     f"✍️ 量表 measure_id（唯一编码）:",
