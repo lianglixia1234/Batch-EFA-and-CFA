@@ -1578,6 +1578,65 @@ def render_stage2_cfa_clean():
                             fname=fname,
                             measure_id=st.session_state[f"n2_{sub_name}_measure_id"],
                         )
+    # ==========================================================================
+    # 6. preCFA 全局确认清单（底部看板）
+    # ==========================================================================
+    st.markdown("---")
+    st.subheader("📋 preCFA 确认清单")
+    st.caption("以下展示所有已点击「✅ 确认结果」并锁定至 N2_preCFA 的量表。如需修改某个量表，请回到上方对应标签页重新点击确认。")
+
+    n2_precfa = st.session_state.get("N2_preCFA", {})
+    
+    if not n2_precfa:
+        st.info("💡 当前暂无已确认的量表。请在上方各量表标签页中完成分析并点击「✅ 确认结果」按钮。")
+    else:
+        # 构建汇总表格
+        summary_rows = []
+        for mid, payload in n2_precfa.items():
+            fit = payload.get("fit_stats", {})
+            
+            def _extract_fit_val(fit_obj, key):
+                if isinstance(fit_obj, dict):
+                    return fit_obj.get(key, np.nan)
+                elif isinstance(fit_obj, pd.DataFrame):
+                    for col in fit_obj.columns:
+                        if fit_obj[col].dtype == object:
+                            rows = fit_obj[fit_obj[col].astype(str).str.upper() == key.upper()]
+                            if not rows.empty:
+                                val_cols = [c for c in fit_obj.columns if c != col]
+                                try:
+                                    return float(rows[val_cols[0]].values[0])
+                                except:
+                                    pass
+                return np.nan
+
+            summary_rows.append({
+                "measure名": payload.get("factor_name", "-"),
+                "保留题目数": len(payload.get("kept_items", [])),
+                "CFI": _extract_fit_val(fit, "CFI"),
+                "TLI": _extract_fit_val(fit, "TLI"),
+                "RMSEA": _extract_fit_val(fit, "RMSEA"),
+                "SRMR": _extract_fit_val(fit, "SRMR"),
+            })
+        
+        summary_df = pd.DataFrame(summary_rows)
+        
+        # 格式化数值列
+        for col in ["CFI", "TLI", "RMSEA", "SRMR"]:
+            if col in summary_df.columns:
+                summary_df[col] = summary_df[col].apply(
+                    lambda x: f"{x:.3f}" if pd.notna(x) and isinstance(x, (int, float)) else "N/A"
+                )
+        
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+        # 可展开查看每份量表保留的具体题目
+        with st.expander("🔍 查看各量表保留的题目详情", expanded=False):
+            for mid, payload in n2_precfa.items():
+                kept = payload.get("kept_items", [])
+                factor_name = payload.get("factor_name", "-")
+                st.markdown(f"**{mid}**（因子：{factor_name}，共 {len(kept)} 题）")
+                st.caption(", ".join(kept))
 
 
 # =============================================================================
@@ -1989,6 +2048,9 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         st.error(f"生成报告时出错: {e}")
         import traceback
         st.code(traceback.format_exc())
+
+
+
 
 
 # ########################
