@@ -1715,6 +1715,7 @@ def _extract_fit(fit_stats, key):
 def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_items, final_estimates, final_fit, fname, measure_id):
     """生成Excel报告并触发下载"""
     try:
+        fname = str(fname).strip()
         df_cfa = final_df_cfa.copy()
         factor_items = final_factor_items
         estimates = final_estimates.copy()
