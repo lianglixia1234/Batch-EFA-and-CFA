@@ -1723,263 +1723,109 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
 
         mid = str(measure_id).strip() if measure_id else "measure"
 
-        def _to_num(x):
-            try:
-                if x is None:
-                    return np.nan
-                if isinstance(x, str):
-                    x = x.strip()
-                    if x in ("", "-", "nan", "NaN", "None"):
-                        return np.nan
-                return float(x)
-            except (TypeError, ValueError):
-                return np.nan
-
-        # 提取潜变量方差
+        # ============================================================
+        # 1. 统一清洗 estimates，防止隐藏空格导致匹配失败
+        # ============================================================
+        estimates_clean = estimates.copy()
+        for col in ['LHS', 'op', 'RHS']:
+            if col in estimates_clean.columns:
+                estimates_clean[col] = estimates_clean[col].astype(str).str.strip()
+        
+        fname_clean = str(fname).strip()
+        
+        # ============================================================
+        # 2. 提取潜变量方差 (trait_var)
+        # ============================================================
         trait_var = np.nan
-        for _, row in estimates.iterrows():
-            if row.get("op") == "~~" and row.get("LHS") == fname and row.get("RHS") == fname:
-                trait_var = row.get("Estimate", np.nan)
-                break
-
-        # 提取载荷（清洗名作为键）
+        
+        # 严格匹配
+        latent_rows = estimates_clean[
+            (estimates_clean['op'] == "~~") & 
+            (estimates_clean['LHS'] == fname_clean) & 
+            (estimates_clean['RHS'] == fname_clean)
+        ]
+        if not latent_rows.empty:
+            trait_var = _to_num(latent_rows.iloc[0].get('Estimate', np.nan))
+        
+        # 忽略大小写兜底
+        if np.isnan(trait_var):
+            latent_rows = estimates_clean[
+                (estimates_clean['op'] == "~~") & 
+                (estimates_clean['LHS'].str.lower() == fname_clean.lower()) & 
+                (estimates_clean['RHS'].str.lower() == fname_clean.lower())
+            ]
+            if not latent_rows.empty:
+                trait_var = _to_num(latent_rows.iloc[0].get('Estimate', np.nan))
+        
+        # ============================================================
+        # 3. 提取非标准化 & 标准化载荷（以 RHS 清洗名作为键）
+        # ============================================================
         loadings_unstd = {}
         loadings_std = {}
-        if "LHS" in estimates.columns and "op" in estimates.columns and "RHS" in estimates.columns:
-            # 去除空格
-            estimates['op_strip'] = estimates['op'].astype(str).str.strip()
-            estimates['LHS_strip'] = estimates['LHS'].astype(str).str.strip()
-            estimates['RHS_strip'] = estimates['RHS'].astype(str).str.strip()
-            fname_clean = str(fname).strip()
-            # 查找主因子载荷
-            trait_loadings = estimates[(estimates['op_strip'] == "=~") & (estimates['LHS_strip'] == fname_clean)]
-            if trait_loadings.empty:
-                # 尝试忽略大小写
-                trait_loadings = estimates[
-                    (estimates['op_strip'] == "=~") & 
-                    (estimates['LHS_strip'].str.lower() == fname_clean.lower())
-                ]
-            if trait_loadings.empty:
-                # 可能 op 是 '~'（回归形式）
-                trait_loadings = estimates[(estimates['op_strip'] == "~") & (estimates['RHS_strip'] == fname_clean)]
-            if trait_loadings.empty:
-                trait_loadings = estimates[
-                    (estimates['op_strip'] == "~") & 
-                    (estimates['RHS_strip'].str.lower() == fname_clean.lower())
-                ]
-            # 提取载荷
-            for _, row in trait_loadings.iterrows():
-                item_key = row['RHS_strip']  # 清洗名
-                loadings_unstd[item_key] = _to_num(row.get('Estimate', np.nan))
-                loadings_std[item_key] = _to_num(row.get('Std.all', np.nan))
         
+        # 尝试 =~ 形式
+        trait_loadings = estimates_clean[
+            (estimates_clean['op'] == "=~") & 
+            (estimates_clean['LHS'] == fname_clean)
+        ]
+        if trait_loadings.empty:
+            trait_loadings = estimates_clean[
+                (estimates_clean['op'] == "=~") & 
+                (estimates_clean['LHS'].str.lower() == fname_clean.lower())
+            ]
+        # 兜底 ~ 形式
+        if trait_loadings.empty:
+            trait_loadings = estimates_clean[
+                (estimates_clean['op'] == "~") & 
+                (estimates_clean['RHS'] == fname_clean)
+            ]
+        if trait_loadings.empty:
+            trait_loadings = estimates_clean[
+                (estimates_clean['op'] == "~") & 
+                (estimates_clean['RHS'].str.lower() == fname_clean.lower())
+            ]
         
+        for _, row in trait_loadings.iterrows():
+            item_key = str(row['RHS']).strip()
+            loadings_unstd[item_key] = _to_num(row.get('Estimate', np.nan))
+            # semopy 标准化列名可能不同，按优先级取
+            std_val = row.get('Std.all', row.get('Std. All', row.get('Est. Std', row.get('est.std', np.nan))))
+            loadings_std[item_key] = _to_num(std_val)
         
-
-
-        def _get_any(d, keys, default=np.nan):
-            for k in keys:
-                if k in d:
-                    v = _to_num(d.get(k))
-                    if not np.isnan(v):
-                        return v
-            return default
-
-        chi2_val = _get_any(stats_dict, ["chi2", "Chi2"])
-        dof_val = _get_any(stats_dict, ["DoF", "dof", "df"])
-        p_val = _get_any(stats_dict, ["chi2 p-value", "p-value", "pvalue", "p_value"])
-        alpha_val = cronbach_alpha(df_cfa) if not df_cfa.empty else np.nan
-
-
-        # Composite Reliability (CR_F): 使用完全标准化载荷
-        # lambda_std_i = lambda_i * sqrt(phi) / s_i, 其中 s_i 来自题目协方差矩阵 Sigma 的对角线
-        # Composite Reliability (CR_F)
-        cr_val = np.nan
-        cr_reason = ""
-        try:
-            # factor_items 已经是清洗后的列名，无需再映射
-            sorted_items_for_cr = sort_item_cols_by_number(factor_items)
-            used_cols_for_cr = [c for c in sorted_items_for_cr if c in df_cfa.columns]
-
-            if not used_cols_for_cr:
-                cr_reason = "CR 未计算：未找到用于 CR 的题目列。"
-            else:
-                x_cr = df_cfa[used_cols_for_cr].apply(pd.to_numeric, errors="coerce").dropna(axis=0, how="any")
-                if x_cr.empty:
-                    cr_reason = "CR 未计算：用于 CR 的有效样本为空。"
-                else:
-                    sigma_cr = x_cr.cov().values
-                    s_vec = np.sqrt(np.diag(sigma_cr))
-
-                    # 用 strip 后的键建立查找字典，防止首尾空格导致匹配失败
-                    loadings_unstd_stripped = {k.strip(): v for k, v in loadings_unstd.items()}
-
-                    lambda_unstd_vec = np.array(
-                        [_to_num(loadings_unstd_stripped.get(c.strip(), np.nan)) for c in used_cols_for_cr],
-                        dtype=float,
-                    )
-                    phi_num = _to_num(trait_var)  # 直接用前面提取好的潜变量方差
-
-                    if np.isnan(phi_num) or phi_num <= 0:
-                        cr_reason = "CR 未计算：主因子方差 φ 缺失或非正数。"
-                    elif np.isnan(lambda_unstd_vec).any():
-                        miss_cols = [used_cols_for_cr[i] for i, v in enumerate(lambda_unstd_vec) if np.isnan(v)]
-                        cr_reason = f"CR 未计算：以下题目缺少非标准化载荷：{', '.join(miss_cols[:6])}"
-                    elif (not np.all(np.isfinite(s_vec))) or np.any(s_vec <= 0):
-                        cr_reason = "CR 未计算：题目标准差存在无效值。"
-                    else:
-                        lambda_std = (lambda_unstd_vec * np.sqrt(phi_num)) / s_vec
-                        S = float(np.sum(lambda_std))
-                        E = float(np.sum(1.0 - lambda_std ** 2))
-                        den = (S ** 2) + E
-                        if np.isfinite(den) and den > 0:
-                            cr_val = float((S ** 2) / den)
-                        else:
-                            cr_reason = "CR 未计算：分母无效。"
-        except Exception as cr_e:
-            cr_val = np.nan
-            cr_reason = f"CR 未计算：计算过程异常（{cr_e}）。"
-
+        # ============================================================
+        # 4. 调试输出（确认一次后注释掉）
+        # ============================================================
+        # st.write(f"DEBUG 因子名: '{fname_clean}' | trait_var: {trait_var}")
+        # st.write(f"DEBUG 载荷键: {list(loadings_unstd.keys())}")
+        # st.write(f"DEBUG factor_items: {factor_items}")
 
         
-        # 构建题目明细表（显示原始名）
-        sorted_items = sort_item_cols_by_number(factor_items)
-        rows = []
-        for idx, item_clean in enumerate(sorted_items, start=1):
-            
-            item_key = item_clean.strip()   # 关键：去除空格
-            # 后续使用 item_key 去 loadings_unstd 和 loadings_std 中取值
-            unstd = loadings_unstd.get(item_key, np.nan)
-            std = loadings_std.get(item_key, np.nan)
-            
+                for idx, item_clean in enumerate(sorted_items, start=1):
             item_raw = clean_to_orig.get(item_clean, item_clean)
             _, num, text = parse_item_col(item_raw)
             rev = 1 if _is_reverse_coded(item_raw) else 0
             item_number = num if num is not None else idx
 
+            # 直接用外面提取好的字典取值
+            unstd_load = loadings_unstd.get(str(item_clean).strip(), np.nan)
+            std_load = loadings_std.get(str(item_clean).strip(), np.nan)
 
-            # =============================================================================
-            # 🚀 优化后的载荷与方差动态提取逻辑
-            # =============================================================================
-            
-            # 1. 提取潜在变量方差 (variance_latent)
-            # 条件：LHS == sub_name 且 RHS == sub_name
-            # 注：有时候 semopy 内部名字也是清洗过的，我们同时用原始名和清洗名做兼容匹配
-            sub_name_clean = cfg.get("sub_name_clean", sub_name) 
-            
-            latent_var_row = final_estimates[
-                ((final_estimates['LHS'] == sub_name) | (final_estimates['LHS'] == sub_name_clean)) & 
-                ((final_estimates['RHS'] == sub_name) | (final_estimates['RHS'] == sub_name_clean))
-            ]
-            
-            if not latent_var_row.empty:
-                # 优先取 'Estimate' 列作为方差
-                trait_var = latent_var_row.iloc[0].get('Estimate', np.nan)
-            else:
-                trait_var = np.nan
-  
-
-
-            
-            # 1. 统一前缀数字提取函数（例如 1_xxx 或 01_xxx 都能提取出 1）
-            # =============================================================================
-            # 🚀 完全按精确文本与前缀数字进行匹配 (variance_latent & loadings)
-            # =============================================================================
-            
-            # 1. 统一前缀数字提取函数（例如 1_xxx 提取出 1）
-            def get_prefix_num(item_str):
-                if not isinstance(item_str, str):
-                    return None
-                match = re.match(r'^.*?(\d+)', item_str)
-                return int(match.group(1)) if match else None
-            
-            # 获取当前这道题目的前缀数字
-            current_item_num = get_prefix_num(item_raw)
-            
-            # 2. 深度清洗并去除隐藏空格，防止因为末尾有空格导致 LHS == RHS 失败
-            estimates_clean = final_estimates.copy()
-            for col in ['LHS', 'op', 'RHS']:
-                if col in estimates_clean.columns:
-                    estimates_clean[col] = estimates_clean[col].astype(str).str.strip()
-            
-            # 3. 🎯 提取潜变量方差 (variance_latent)
-            # 🎯 精准锁死：根据主因子名字 m_name 提取方差 (自动清洗空格与大小写)
-            # =============================================================================
-            trait_var = np.nan
-            
-            
-            # 1. 提取可能的目标名字并去除隐蔽空格
-            sub_name_str = str(sub_name).strip()
-            sub_name_clean = str(cfg.get("sub_name_clean", sub_name)).strip()
-            
-            # 2. 局部去空格清洗（只在变量匹配时用，确保完全相等不被空格背刺）
-            estimates_temp = final_estimates.copy()
-            for col in ['LHS', 'op', 'RHS']:
-                if col in estimates_temp.columns:
-                    estimates_temp[col] = estimates_temp[col].astype(str).str.strip()
-            
-            # 3. 严格执行双向等于因子名的判断 (op 为 '~~' 代表方差)
-            latent_var_row = estimates_temp[
-                (estimates_temp['op'] == "~~") & 
-                (estimates_temp['LHS'].isin([sub_name_str, sub_name_clean])) & 
-                (estimates_temp['RHS'].isin([sub_name_str, sub_name_clean]))
-            ]
-            
-            if not latent_var_row.empty:
-                # 提取 Estimate 转换并赋值
-                trait_var = _to_num(latent_var_row.iloc[0].get('Estimate', np.nan))
-            else:
-                trait_var = np.nan
-            
-            # 如果上面那种极度严格的办法还是没抓到，启动排除法兜底
-            if np.isnan(trait_var):
-                for _, row in estimates_clean[estimates_clean['op'] == "~~"].iterrows():
-                    l_text = str(row['LHS']).strip().lower()
-                    r_text = str(row['RHS']).strip().lower()
-                    
-                    # 只要两端相等，且不是题目（不含题目数字前缀），那它就是主因子方差
-                    if l_text == r_text and get_prefix_num(l_text) is None:
-                        trait_var = _to_num(row.get('Estimate', np.nan))
-                        break
-            
-            # 4. 🎯 提取当前题目的非标准化与标准化载荷 (只要 LHS 或 RHS 包含当前题目数字前缀即命中)
-            unstd_load = np.nan
-            std_load = np.nan
-            
-            if current_item_num is not None:
-                # 筛选出属于载荷的操作符行
-                loading_rows = estimates_clean[estimates_clean['op'].isin(["=~", "~"])]
-                
-                for _, row in loading_rows.iterrows():
-                    lhs_num = get_prefix_num(row['LHS'])
-                    rhs_num = get_prefix_num(row['RHS'])
-                    
-                    # 核心：只要这一行的 LHS 或者 RHS 的前缀数字等同于当前题目的数字，即命中
-                    if lhs_num == current_item_num or rhs_num == current_item_num:
-                        unstd_load = _to_num(row.get('Estimate', np.nan))
-                        std_load = _to_num(row.get('Std.all', row.get('Std. All', np.nan)))
-                        break
-
-
-# =============================================================================
+            # 清理 item_text
             m = re.match(r'^(\d+)_(.*)$', item_raw)
-            
             if m:
-                item_number = int(m.group(1))   # 提取前面的数字
-                item_text = m.group(2).strip()  # 去掉数字和下划线后的文本
+                item_number = int(m.group(1))
+                item_text = m.group(2).strip()
             else:
-                item_text = text or item_raw    # 没有前缀则保持原样
+                item_text = text or item_raw
 
             rows.append({
-                "measure_id":  mid,
+                "measure_id": mid,
                 "item_number": item_number,
                 "item_text": item_text,
                 "reverse": rev,
-                "variance_latent": trait_var, # ✨ 已成功获取
-                
-                "unstandardised_loading": unstd_load, # ✨ 精准匹配获取
-                "standardised_loading": std_load,     # ✨ 精准匹配获取
-                
+                "variance_latent": trait_var,           # ← 直接用循环外提取好的
+                "unstandardised_loading": unstd_load,   # ← 直接用字典取值
+                "standardised_loading": std_load,       # ← 直接用字典取值
                 "chi2_user_model": chi2_val,
                 "df_user_model": dof_val,
                 "p_value_user_model": p_val,
@@ -1990,7 +1836,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 "GFI": _get_any(stats_dict, ["GFI"]),
                 "AGFI": _get_any(stats_dict, ["AGFI"]),
                 "NFI": _get_any(stats_dict, ["NFI"]),
-                "LogL": _get_any(stats_dict, ["LogL", "logl", "LogLik", "loglik", "log_likelihood", "log-likelihood"]),
+                "LogL": _get_any(stats_dict, ["LogL", "logl", "LogLik", "loglik"]),
                 "AIC": _get_any(stats_dict, ["AIC"]),
                 "BIC": _get_any(stats_dict, ["BIC"]),
                 "SABIC": _get_any(stats_dict, ["SABIC"]),
