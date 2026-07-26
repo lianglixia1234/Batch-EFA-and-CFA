@@ -2030,7 +2030,6 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             st.session_state.n2_report_cov_preview.head(20),
             use_container_width=True,
         )
-
         
         st.download_button(
             label="⬇️ 点击下载 Excel 报告",
@@ -2040,6 +2039,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             key=f"n2_{sub_name}_dl_excel",
         )
         st.success("报告已生成！")
+        
     except Exception as e:
         st.error(f"生成报告时出错: {e}")
         import traceback
