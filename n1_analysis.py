@@ -1734,130 +1734,88 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 return np.nan
 
         # ============================================================
-        # 0. 自动探测 estimates 列名
+        # 0. 清洗 estimates 列
         # ============================================================
-        col_lhs = None
-        col_rhs = None
-        col_op = None
-        for c in estimates.columns:
-            c_lower = str(c).lower().strip()
-            if c_lower in ('lhs', 'lval'):
-                col_lhs = c
-            elif c_lower in ('rhs', 'rval'):
-                col_rhs = c
-            elif c_lower == 'op':
-                col_op = c
-        
-        if not all([col_lhs, col_rhs, col_op]):
-            st.error(f"⚠️ 无法识别 estimates 列名。实际列名: {list(estimates.columns)}")
-            st.stop()
-
-        estimates[col_lhs] = estimates[col_lhs].astype(str).str.strip()
-        estimates[col_rhs] = estimates[col_rhs].astype(str).str.strip()
-        estimates[col_op] = estimates[col_op].astype(str).str.strip()
+        est = estimates.copy()
+        for col in est.columns:
+            if est[col].dtype == object:
+                est[col] = est[col].astype(str).str.strip()
 
         # ============================================================
-        # 1. 自动探测因子名
-        # ============================================================
-        fname_clean = str(fname).strip()
-        possible_fnames = [fname_clean]
-        
-        latent_rows = estimates[estimates[col_op] == "=~"]
-        if not latent_rows.empty:
-            detected = latent_rows[col_lhs].unique().tolist()
-            for d in detected:
-                if d not in possible_fnames:
-                    possible_fnames.append(d)
-        
-        matched_fname = None
-        loadings_mode = None  # '=~' 或 '~'
-        for pfn in possible_fnames:
-            if not estimates[(estimates[col_op] == "=~") & (estimates[col_lhs] == pfn)].empty:
-                matched_fname = pfn
-                loadings_mode = "=~"
-                break
-            if not estimates[(estimates[col_op] == "~") & (estimates[col_rhs] == pfn)].empty:
-                matched_fname = pfn
-                loadings_mode = "~"
-                break
-        
-        if matched_fname is None:
-            st.error(f"⚠️ 找不到因子 '{fname_clean}' 的载荷行。estimates 中潜在因子: {possible_fnames}")
-            st.stop()
-        
-        fname_clean = matched_fname
-
-        # ============================================================
-        # 2. 提取潜变量方差
+        # 1. 提取潜变量方差 (trait_var)
+        #    找 op='~~' 且 LHS==RHS==fname 的行
         # ============================================================
         trait_var = np.nan
-        var_rows = estimates[
-            (estimates[col_op] == "~~") & 
-            (estimates[col_lhs] == fname_clean) & 
-            (estimates[col_rhs] == fname_clean)
-        ]
-        if not var_rows.empty:
-            trait_var = _to_num(var_rows.iloc[0].get('Estimate', np.nan))
+        var_mask = (est['op'] == '~~') & (est['LHS'] == fname) & (est['RHS'] == fname)
+        if var_mask.any():
+            trait_var = _to_num(est.loc[var_mask, 'Estimate'].iloc[0])
+        else:
+            # 忽略大小写兜底
+            var_mask = (est['op'] == '~~') & (est['LHS'].str.lower() == fname.lower()) & (est['RHS'].str.lower() == fname.lower())
+            if var_mask.any():
+                trait_var = _to_num(est.loc[var_mask, 'Estimate'].iloc[0])
 
         # ============================================================
-        # 3. 提取载荷（修复 =~ / ~ 形式的列选择）
+        # 2. 提取载荷
+        #    你的 semopy 用 op='~'，LHS=题目，RHS=因子名
         # ============================================================
         loadings_unstd = {}
         loadings_std = {}
         
-        if loadings_mode == "=~":
-            trait_loadings = estimates[
-                (estimates[col_op] == "=~") & 
-                (estimates[col_lhs] == fname_clean)
-            ]
-            item_key_col = col_rhs  # =~ 形式：RHS 是题目
-        else:
-            trait_loadings = estimates[
-                (estimates[col_op] == "~") & 
-                (estimates[col_rhs] == fname_clean)
-            ]
-            item_key_col = col_lhs  # ~ 形式：LHS 是题目
+        # 主因子载荷：op='~'，RHS=fname，LHS是题目
+        load_mask = (est['op'] == '~') & (est['RHS'] == fname)
+        if not load_mask.any():
+            load_mask = (est['op'] == '~') & (est['RHS'].str.lower() == fname.lower())
         
-        for _, row in trait_loadings.iterrows():
-            item_key = str(row[item_key_col]).strip()
-            loadings_unstd[item_key] = _to_num(row.get('Estimate', np.nan))
+        load_rows = est[load_mask]
+        for _, row in load_rows.iterrows():
+            item_name = str(row['LHS'])
+            loadings_unstd[item_name] = _to_num(row.get('Estimate', np.nan))
             std_val = row.get('Std.all', row.get('Std. All', row.get('Est. Std', row.get('est.std', np.nan))))
-            loadings_std[item_key] = _to_num(std_val)
+            loadings_std[item_name] = _to_num(std_val)
 
         # ============================================================
-        # 4. 前缀数字匹配函数（你要求的核心兜底）
+        # 3. 前缀数字匹配函数（核心修复）
         # ============================================================
         def _get_prefix_num(s):
             m = re.match(r'^(\d+)', str(s))
             return int(m.group(1)) if m else None
-        
-        def _match_by_prefix(target_item, loadings_dict):
-            """先用精确匹配，再用前缀数字匹配"""
+
+        def _match_loading_by_prefix(target_item, loadings_dict):
+            """
+            匹配策略：
+            1. 精确匹配
+            2. 忽略空格差异
+            3. 前缀数字匹配（如 1_xxx 匹配 1_yyy）
+            """
             # 1. 精确
             if target_item in loadings_dict:
                 return loadings_dict[target_item]
-            # 2. strip
-            t_strip = str(target_item).strip()
-            if t_strip in loadings_dict:
-                return loadings_dict[t_strip]
-            # 3. 前缀数字匹配
-            t_num = _get_prefix_num(t_strip)
+            
+            # 2. 去除尾部下划线后匹配
+            t_clean = str(target_item).rstrip('_')
+            for k, v in loadings_dict.items():
+                if str(k).rstrip('_') == t_clean:
+                    return v
+            
+            # 3. 前缀数字匹配（你要求的核心）
+            t_num = _get_prefix_num(target_item)
             if t_num is not None:
                 for k, v in loadings_dict.items():
                     if _get_prefix_num(k) == t_num:
                         return v
+            
             return np.nan
 
         # ============================================================
-        # 5. DEBUG 输出
+        # 4. 调试输出
         # ============================================================
-        st.write(f"🛠️ DEBUG: 因子名='{fname_clean}' | 模式='{loadings_mode}' | trait_var={trait_var}")
+        st.write(f"🛠️ DEBUG: 因子名='{fname}' | trait_var={trait_var}")
         st.write(f"🛠️ DEBUG: 提取到 {len(loadings_unstd)} 个载荷")
-        st.write(f"🛠️ DEBUG: 载荷键（前10个）= {list(loadings_unstd.keys())[:10]}")
-        st.write(f"🛠️ DEBUG: factor_items（前5个）= {factor_items[:5]}")
+        st.write(f"🛠️ DEBUG: 载荷前缀样例 = {[_get_prefix_num(k) for k in list(loadings_unstd.keys())[:5]]}")
 
         # ============================================================
-        # 6. 拟合指标兼容提取
+        # 5. 拟合指标提取
         # ============================================================
         def _norm_key(k):
             return re.sub(r"[^a-z0-9]+", "", str(k).lower())
@@ -1882,7 +1840,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         alpha_val = cronbach_alpha(df_cfa) if not df_cfa.empty else np.nan
 
         # ============================================================
-        # 7. CR 计算（使用前缀数字兜底匹配）
+        # 6. CR 计算（使用前缀数字匹配）
         # ============================================================
         cr_val = np.nan
         cr_reason = ""
@@ -1902,7 +1860,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                     
                     # 用前缀数字匹配取载荷
                     lambda_unstd_vec = np.array(
-                        [_to_num(_match_by_prefix(c, loadings_unstd)) for c in used_cols_for_cr],
+                        [_to_num(_match_loading_by_prefix(c, loadings_unstd)) for c in used_cols_for_cr],
                         dtype=float,
                     )
                     phi_num = _to_num(trait_var)
@@ -1912,8 +1870,6 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                     elif np.isnan(lambda_unstd_vec).any():
                         miss_cols = [used_cols_for_cr[i] for i, v in enumerate(lambda_unstd_vec) if np.isnan(v)]
                         cr_reason = f"CR 未计算：以下题目缺少载荷：{', '.join(miss_cols[:6])}"
-                        st.write(f"🛠️ DEBUG CR: 缺少载荷的题目 = {miss_cols}")
-                        st.write(f"🛠️ DEBUG CR: loadings_unstd 全部键 = {list(loadings_unstd.keys())}")
                     elif (not np.all(np.isfinite(s_vec))) or np.any(s_vec <= 0):
                         cr_reason = "CR 未计算：题目标准差存在无效值。"
                     else:
@@ -1930,7 +1886,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             cr_reason = f"CR 未计算：异常（{cr_e}）。"
 
         # ============================================================
-        # 8. 构建题目明细表（同样用前缀数字兜底匹配载荷）
+        # 7. 构建题目明细表
         # ============================================================
         def _extract_item_number(item_name, fallback_idx):
             _, num_parsed, _ = parse_item_col(item_name)
@@ -1950,8 +1906,8 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             item_number = num if num is not None else _extract_item_number(item, idx)
             
             # 用前缀数字匹配取载荷
-            unstd = _match_by_prefix(item, loadings_unstd)
-            std = _match_by_prefix(item, loadings_std)
+            unstd = _match_loading_by_prefix(item, loadings_unstd)
+            std = _match_loading_by_prefix(item, loadings_std)
             
             rows.append({
                 "measure_id": mid,
@@ -1986,7 +1942,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         unstd_empty = sheet_items["unstandardised_loading"].isna().all()
         std_empty = sheet_items["standardised_loading"].isna().all()
         if unstd_empty and std_empty:
-            st.error("⚠️ 载荷全为空。请检查上方 DEBUG 信息，确认因子名和题目名是否匹配。")
+            st.error("⚠️ 载荷全为空。请检查 DEBUG 信息。")
             st.stop()
 
         # 协方差矩阵
