@@ -1806,29 +1806,37 @@ def render_single_cfa():
 # ==============================================================================
 # 批量自动删题CFA核心算法（两阶段）
 # ==============================================================================
-
 def _extract_fit_val(fit_stats, key):
     """从fit_stats中提取指标值（兼容dict和DataFrame）"""
+
+    # 如果key是多个候选名称，依次寻找
+    if isinstance(key, list):
+        for k in key:
+            result = _extract_fit_val(fit_stats, k)
+            if not (isinstance(result, float) and np.isnan(result)):
+                return result
+        return np.nan
+
+    # dict格式
     if isinstance(fit_stats, dict):
         return fit_stats.get(key, np.nan)
+
+    # DataFrame格式
     elif isinstance(fit_stats, pd.DataFrame):
         for col in fit_stats.columns:
             if fit_stats[col].dtype == object:
-                rows = fit_stats[fit_stats[col].astype(str).str.upper() == key.upper()]
+                rows = fit_stats[
+                    fit_stats[col].astype(str).str.upper() == key.upper()
+                ]
+
                 if not rows.empty:
                     val_cols = [c for c in fit_stats.columns if c != col]
                     try:
                         return float(rows[val_cols[0]].values[0])
                     except:
                         pass
+
     return np.nan
-    if isinstance(key, list):
-        for k in key:
-            if k in fit_stats:
-                return fit_stats[k]
-        return np.nan
-    
-    return fit_stats.get(key, np.nan)
 
 def _run_cfa_and_extract(df, factor_name, factor_items, method_name, method_items):
     """运行CFA并提取关键指标，返回统一格式的结果字典"""
