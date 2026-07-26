@@ -1975,7 +1975,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             rows.append({
                 "measure_id": mid,
                 "item_number": item_number,
-                "item_text": re.sub(r'^\d+_', '', item_txt)，
+                "item_text": re.sub(r'^\d+_', '', item_txt),
                 "reverse": rev,
                 "variance_latent": trait_var,
                 "unstandardised_loading": unstd,
