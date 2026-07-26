@@ -2069,40 +2069,107 @@ def render_batch_cfa():
     - *Stage 2（求精简）*：追求 CFI ≥ 0.95、TLI ≥ 0.95，同时精简至目标题数
     """)
 
+  
     # ==========================================================
-    # 1. 数据来源：读取已保存的子数据集
+    # 1. 数据来源
     # ==========================================================
-    st.subheader("📂 选择要分析的 Measure")
+    st.subheader("📂 选择数据来源与 Measure")
     
     has_sub_datasets = 'sub_datasets' in st.session_state and len(st.session_state.sub_datasets) > 0
-    
-    if not has_sub_datasets:
-        st.warning("未检测到已保存的子数据集。请先前往 Data Cleaning 模块保存子数据集。")
-        return
-
-    all_dataset_names = list(st.session_state.sub_datasets.keys())
-    selected_dataset_names = st.multiselect(
-        "选择已保存的子数据集（默认全选）：",
-        options=all_dataset_names,
-        default=all_dataset_names,
-        key="batch_selected_datasets"
+    has_dual_data = (
+        st.session_state.get("dc_merge_done")
+        and st.session_state.get("dc_dataset_full")
+        and st.session_state.get("dc_measures")
     )
     
-    if not selected_dataset_names:
-        st.warning("请至少选择一个子数据集。")
+    if not has_sub_datasets and not has_dual_data:
+        st.warning("未检测到可用的数据源。请先前往 Data Cleaning 模块保存子数据集，或完成双数据集/四数据集清洗。")
         return
 
+    source_options = []
+    if has_sub_datasets:
+        source_options.append("💾 来自 Data Cleaning（子数据集）")
+    if has_dual_data:
+        source_options.append("💾 来自 Data Cleaning（四数据集）")
+    
+    data_source = st.radio("请选择数据来源:", source_options, horizontal=True, key="batch_data_source")
+    
     available_measures = {}
-    for ds_name in selected_dataset_names:
-        df_sub = st.session_state.sub_datasets[ds_name].copy()
-        df_sub.columns = [re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(c)) for c in df_sub.columns]
-        df_num = df_sub.apply(pd.to_numeric, errors='coerce').dropna(axis=1, how='all')
-        num_cols = df_num.columns.tolist()
-        if num_cols:
-            available_measures[ds_name] = {'df': df_num, 'items': num_cols}
+    
+    # ---------- 分支 A：子数据集 ----------
+    if data_source == "💾 来自 Data Cleaning（子数据集）":
+        all_dataset_names = list(st.session_state.sub_datasets.keys())
+        selected_dataset_names = st.multiselect(
+            "选择已保存的子数据集（默认全选）：",
+            options=all_dataset_names,
+            default=all_dataset_names,
+            key="batch_selected_datasets"
+        )
+        if not selected_dataset_names:
+            st.warning("请至少选择一个子数据集。")
+            return
+        
+        for ds_name in selected_dataset_names:
+            df_sub = st.session_state.sub_datasets[ds_name].copy()
+            df_sub.columns = [re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(c)) for c in df_sub.columns]
+            df_num = df_sub.apply(pd.to_numeric, errors='coerce').dropna(axis=1, how='all')
+            num_cols = df_num.columns.tolist()
+            if num_cols:
+                available_measures[ds_name] = {'df': df_num, 'items': num_cols}
+    
+    # ---------- 分支 B：四数据集 ----------
+    elif data_source == "💾 来自 Data Cleaning（四数据集）":
+        from data_cleaning_dual import get_dual_mode_analysis_df
+        
+        dataset_names = ["Dataset1", "Dataset2", "Dataset3", "Dataset4"]
+        selected_dataset = st.selectbox(
+            "选择数据集",
+            dataset_names,
+            key="batch_dual_dataset"
+        )
+        
+        measure_names = list(st.session_state.dc_measures.keys())
+        if not measure_names:
+            st.warning("请在数据清洗模块的「Measure 划分」中至少定义一个 Measure。")
+            return
+        
+        selected_measures = st.multiselect(
+            "选择 Measure（可多选，默认全选）",
+            measure_names,
+            default=measure_names,
+            key="batch_dual_measures"
+        )
+        if not selected_measures:
+            st.warning("请至少选择一个 Measure。")
+            return
+        
+        df_analysis = get_dual_mode_analysis_df(
+            selected_dataset,
+            selected_measures,
+            st.session_state.dc_dataset_full,
+            st.session_state.dc_measures,
+            item_columns_only=True,
+        )
+        
+        if df_analysis is None or df_analysis.empty:
+            st.error("未能获取到有效数据，请检查 Dataset 和 Measure 选择。")
+            return
+        
+        st.info(f"使用 **{selected_dataset}**，Measure: **{', '.join(selected_measures)}**（{df_analysis.shape[0]} 行 × {df_analysis.shape[1]} 列，仅题目列）")
+        
+        # 清洗列名并按 Measure 拆分
+        df_analysis.columns = [re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(c)) for c in df_analysis.columns]
+        for m_name in selected_measures:
+            raw_cols = st.session_state.dc_measures.get(m_name, [])
+            clean_cols = [re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(c)) for c in raw_cols]
+            measure_cols = [c for c in clean_cols if c in df_analysis.columns]
+            if measure_cols:
+                df_m = df_analysis[measure_cols].apply(pd.to_numeric, errors='coerce').dropna(axis=1, how='all')
+                if not df_m.empty:
+                    available_measures[m_name] = {'df': df_m, 'items': df_m.columns.tolist()}
 
     if not available_measures:
-        st.error("所选子数据集中没有有效的数值列。")
+        st.error("所选数据源中没有有效的数值列。")
         return
 
     st.success(f"已加载 **{len(available_measures)}** 个量表，共 **{sum(len(v['items']) for v in available_measures.values())}** 道题目。")
