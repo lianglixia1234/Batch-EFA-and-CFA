@@ -1715,19 +1715,11 @@ def _extract_fit(fit_stats, key):
 def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_items, final_estimates, final_fit, fname, measure_id):
     """生成Excel报告并触发下载"""
     try:
-        # 映射到局部变量，与 n2 逻辑保持一致
         df_cfa = final_df_cfa.copy()
         factor_items = final_factor_items
-        estimates = final_estimates
+        estimates = final_estimates.copy()
         stats_dict = final_fit
         mid = str(measure_id).strip() if measure_id else "measure"
-
-        # 列名清洗函数（与 run_cfa_gui 中一致）
-        def _clean_col(name):
-            return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
-
-        # 建立原始列名到清洗后列名的映射（因为 estimates 中的 RHS 是清洗后的列名）
-        item_clean_map = {item: _clean_col(item) for item in factor_items}
 
         def _to_num(x):
             try:
@@ -1741,12 +1733,129 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             except (TypeError, ValueError):
                 return np.nan
 
-        # 兼容不同来源/版本的拟合指标键名（大小写/符号不敏感）
+        # ============================================================
+        # 0. 自动探测 estimates 列名（兼容 semopy 不同版本）
+        # ============================================================
+        col_lhs = None
+        col_rhs = None
+        col_op = None
+        for c in estimates.columns:
+            c_lower = str(c).lower().strip()
+            if c_lower in ('lhs', 'lval'):
+                col_lhs = c
+            elif c_lower in ('rhs', 'rval'):
+                col_rhs = c
+            elif c_lower == 'op':
+                col_op = c
+        
+        if not all([col_lhs, col_rhs, col_op]):
+            st.error(f"⚠️ 无法识别 estimates 的列名。实际列名: {list(estimates.columns)}")
+            st.write("estimates 前5行：")
+            st.dataframe(estimates.head())
+            st.stop()
+
+        # 清洗关键列
+        estimates[col_lhs] = estimates[col_lhs].astype(str).str.strip()
+        estimates[col_rhs] = estimates[col_rhs].astype(str).str.strip()
+        estimates[col_op] = estimates[col_op].astype(str).str.strip()
+
+        # ============================================================
+        # 1. 自动探测因子名（如果传入的 fname 匹配不到，从 =~ 行提取）
+        # ============================================================
+        fname_clean = str(fname).strip()
+        possible_fnames = [fname_clean]
+        
+        # 从 =~ 行的 LHS 提取所有潜在因子名
+        latent_rows = estimates[estimates[col_op] == "=~"]
+        detected_fnames = []
+        if not latent_rows.empty:
+            detected_fnames = latent_rows[col_lhs].unique().tolist()
+            for dfn in detected_fnames:
+                if dfn not in possible_fnames:
+                    possible_fnames.append(dfn)
+        
+        # 尝试找到匹配的因子名
+        matched_fname = None
+        for pfn in possible_fnames:
+            match = estimates[(estimates[col_op] == "=~") & (estimates[col_lhs] == pfn)]
+            if not match.empty:
+                matched_fname = pfn
+                break
+            # 兜底：~ 形式（RHS=因子）
+            match = estimates[(estimates[col_op] == "~") & (estimates[col_rhs] == pfn)]
+            if not match.empty:
+                matched_fname = pfn
+                break
+        
+        if matched_fname is None:
+            st.error(
+                f"⚠️ 无法从 estimates 中匹配到因子载荷行。\n\n"
+                f"• 传入的 fname = '{fname_clean}'\n"
+                f"• estimates 中探测到的潜在因子名: {detected_fnames if detected_fnames else '无'}\n"
+                f"• 请检查「主因子名称」是否和模型语法中的名字完全一致。"
+            )
+            st.write("estimates 前10行（供排查）：")
+            st.dataframe(estimates.head(10))
+            st.stop()
+        
+        fname_clean = matched_fname
+
+        # ============================================================
+        # 2. 提取潜变量方差 (trait_var)
+        # ============================================================
+        trait_var = np.nan
+        var_rows = estimates[
+            (estimates[col_op] == "~~") & 
+            (estimates[col_lhs] == fname_clean) & 
+            (estimates[col_rhs] == fname_clean)
+        ]
+        if not var_rows.empty:
+            trait_var = _to_num(var_rows.iloc[0].get('Estimate', np.nan))
+
+        # ============================================================
+        # 3. 提取非标准化 & 标准化载荷
+        # ============================================================
+        loadings_unstd = {}
+        loadings_std = {}
+        
+        # 优先 =~ 形式
+        trait_loadings = estimates[
+            (estimates[col_op] == "=~") & 
+            (estimates[col_lhs] == fname_clean)
+        ]
+        # 兜底 ~ 形式
+        if trait_loadings.empty:
+            trait_loadings = estimates[
+                (estimates[col_op] == "~") & 
+                (estimates[col_rhs] == fname_clean)
+            ]
+        
+        for _, row in trait_loadings.iterrows():
+            item_key = str(row[col_rhs]).strip()
+            loadings_unstd[item_key] = _to_num(row.get('Estimate', np.nan))
+            std_val = row.get('Std.all', row.get('Std. All', row.get('Est. Std', row.get('est.std', np.nan))))
+            loadings_std[item_key] = _to_num(std_val)
+
+        # ============================================================
+        # 4. 调试输出（确认正常后可将下面4行注释掉）
+        # ============================================================
+        st.write(f"🛠️ DEBUG: 匹配到的因子名 = '{fname_clean}' | trait_var = {trait_var}")
+        st.write(f"🛠️ DEBUG: 提取到 {len(loadings_unstd)} 个载荷")
+        st.write(f"🛠️ DEBUG: 载荷键（前5个）= {list(loadings_unstd.keys())[:5]}")
+        st.write(f"🛠️ DEBUG: factor_items（前5个）= {factor_items[:5]}")
+
+        # ============================================================
+        # 5. 建立列名映射 + CR 计算
+        # ============================================================
+        def _clean_col(name):
+            return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
+        
+        item_clean_map = {item: _clean_col(item) for item in factor_items}
+
+        # 兼容不同来源/版本的拟合指标键名
         def _norm_key(k):
             return re.sub(r"[^a-z0-9]+", "", str(k).lower())
-
         _stats_norm = {_norm_key(k): v for k, v in stats_dict.items()}
-
         def _get_any(d, keys, default=np.nan):
             for k in keys:
                 if k in d:
@@ -1761,64 +1870,58 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                         return v
             return default
 
-        # 潜变量方差 (主因子)
-        trait_var = np.nan
-        est = estimates
-        for _, row in est.iterrows():
-            if row.get("op") == "~~" and row.get("LHS") == fname and row.get("RHS") == fname:
-                trait_var = row.get("Estimate", np.nan)
-                break
-
-        # 载荷：兼容 semopy 两种常见表示
-        loadings_unstd = {}
-        loadings_std = {}
-        if {"LHS", "op", "RHS"}.issubset(est.columns):
-            trait_loadings = est[(est["op"] == "=~") & (est["LHS"] == fname)]
-            if not trait_loadings.empty:
-                for _, row in trait_loadings.iterrows():
-                    item_key = row["RHS"]
-                    loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in est.columns else np.nan
-                    loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in est.columns else np.nan
-            else:
-                trait_loadings = est[(est["op"] == "~") & (est["RHS"] == fname)]
-                for _, row in trait_loadings.iterrows():
-                    item_key = row["LHS"]
-                    loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in est.columns else np.nan
-                    loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in est.columns else np.nan
-
         chi2_val = _get_any(stats_dict, ["chi2", "Chi2"])
         dof_val = _get_any(stats_dict, ["DoF", "dof", "df"])
         p_val = _get_any(stats_dict, ["chi2 p-value", "p-value", "pvalue", "p_value"])
         alpha_val = cronbach_alpha(df_cfa) if not df_cfa.empty else np.nan
 
-        # Composite Reliability (CR)
+        # CR 计算
         cr_val = np.nan
         cr_reason = ""
         try:
             sorted_items_for_cr = sort_item_cols_by_number(factor_items)
             sorted_items_clean_for_cr = [item_clean_map.get(c, c) for c in sorted_items_for_cr]
             used_cols_for_cr = [c for c in sorted_items_clean_for_cr if c in df_cfa.columns]
+
             if not used_cols_for_cr:
                 cr_reason = "CR 未计算：未找到用于 CR 的题目列。"
             else:
                 x_cr = df_cfa[used_cols_for_cr].apply(pd.to_numeric, errors="coerce").dropna(axis=0, how="any")
                 if x_cr.empty:
-                    cr_reason = "CR 未计算：用于 CR 的有效样本为空（题目存在缺失/非数值）。"
+                    cr_reason = "CR 未计算：用于 CR 的有效样本为空。"
                 else:
                     sigma_cr = x_cr.cov().values
                     s_vec = np.sqrt(np.diag(sigma_cr))
+                    
+                    # 多重匹配策略：先精确，再 strip，再原始名
+                    loadings_lookup = {}
+                    for c in used_cols_for_cr:
+                        val = loadings_unstd.get(c, np.nan)
+                        if np.isnan(val):
+                            val = loadings_unstd.get(c.strip(), np.nan)
+                        if np.isnan(val):
+                            # 尝试反向查找：用 loadings_unstd 的键去匹配 c
+                            for k, v in loadings_unstd.items():
+                                if k.strip() == c.strip():
+                                    val = v
+                                    break
+                        loadings_lookup[c] = val
+                    
                     lambda_unstd_vec = np.array(
-                        [_to_num(loadings_unstd.get(c, np.nan)) for c in used_cols_for_cr],
+                        [_to_num(loadings_lookup.get(c, np.nan)) for c in used_cols_for_cr],
                         dtype=float,
                     )
                     phi_num = _to_num(trait_var)
+                    
                     if np.isnan(phi_num) or phi_num <= 0:
-                        cr_reason = "CR 未计算：主因子方差 φ 缺失或非正数。"
+                        cr_reason = f"CR 未计算：主因子方差 φ 缺失或非正数 (当前值: {trait_var})。"
                     elif np.isnan(lambda_unstd_vec).any():
                         miss_cols = [used_cols_for_cr[i] for i, v in enumerate(lambda_unstd_vec) if np.isnan(v)]
                         cr_reason = f"CR 未计算：以下题目缺少非标准化载荷：{', '.join(miss_cols[:6])}"
+                        st.write(f"🛠️ DEBUG CR: loadings_unstd 全部键 = {list(loadings_unstd.keys())}")
+                        st.write(f"🛠️ DEBUG CR: 缺少载荷的题目 = {miss_cols}")
                     elif (not np.all(np.isfinite(s_vec))) or np.any(s_vec <= 0):
-                        cr_reason = "CR 未计算：题目标准差（来自协方差矩阵对角线）存在无效值。"
+                        cr_reason = "CR 未计算：题目标准差存在无效值。"
                     else:
                         lambda_std = (lambda_unstd_vec * np.sqrt(phi_num)) / s_vec
                         S = float(np.sum(lambda_std))
@@ -1827,11 +1930,14 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                         if np.isfinite(den) and den > 0:
                             cr_val = float((S ** 2) / den)
                         else:
-                            cr_reason = "CR 未计算：分母无效（可能由异常载荷导致）。"
+                            cr_reason = "CR 未计算：分母无效。"
         except Exception as cr_e:
             cr_val = np.nan
             cr_reason = f"CR 未计算：计算过程异常（{cr_e}）。"
 
+        # ============================================================
+        # 6. 构建题目明细表
+        # ============================================================
         def _extract_item_number(item_name, item_clean_name, fallback_idx):
             _, num_parsed, _ = parse_item_col(item_name)
             if num_parsed is not None:
@@ -1856,14 +1962,25 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             rev = 1 if _is_reverse_coded(item) else 0
             item_clean = item_clean_map.get(item, item)
             item_number = num if num is not None else _extract_item_number(item, item_clean, idx)
+            
+            # 多重匹配策略取载荷
+            unstd = loadings_unstd.get(item_clean, np.nan)
+            std = loadings_std.get(item_clean, np.nan)
+            if np.isnan(unstd):
+                for k, v in loadings_unstd.items():
+                    if k.strip() == item_clean.strip():
+                        unstd = v
+                        std = loadings_std.get(k, np.nan)
+                        break
+            
             rows.append({
                 "measure_id": mid,
                 "item_number": item_number,
                 "item_text": text or item,
                 "reverse": rev,
                 "variance_latent": trait_var,
-                "unstandardised_loading": loadings_unstd.get(item_clean, np.nan),
-                "standardised_loading": loadings_std.get(item_clean, np.nan),
+                "unstandardised_loading": unstd,
+                "standardised_loading": std,
                 "chi2_user_model": chi2_val,
                 "df_user_model": dof_val,
                 "p_value_user_model": p_val,
@@ -1874,7 +1991,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 "GFI": _get_any(stats_dict, ["GFI"]),
                 "AGFI": _get_any(stats_dict, ["AGFI"]),
                 "NFI": _get_any(stats_dict, ["NFI"]),
-                "LogL": _get_any(stats_dict, ["LogL", "logl", "LogLik", "loglik", "log_likelihood", "log-likelihood"]),
+                "LogL": _get_any(stats_dict, ["LogL", "logl", "LogLik", "loglik"]),
                 "AIC": _get_any(stats_dict, ["AIC"]),
                 "BIC": _get_any(stats_dict, ["BIC"]),
                 "SABIC": _get_any(stats_dict, ["SABIC"]),
@@ -1885,19 +2002,19 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             })
         sheet_items = pd.DataFrame(rows)
 
-        # 校验：如果载荷全空，阻断生成并给出明确提示
+        # 校验
         unstd_empty = sheet_items["unstandardised_loading"].isna().all()
         std_empty = sheet_items["standardised_loading"].isna().all()
         if unstd_empty and std_empty:
             st.error(
-                "生成前校验未通过：`unstandardised_loading` 与 `standardised_loading` 全为空。"
+                "⚠️ 生成前校验未通过：`unstandardised_loading` 与 `standardised_loading` 全为空。\n"
                 "请先确认参数表中存在因子载荷行，并且题目列名与模型估计表可匹配后再生成。"
             )
             st.info(
                 "排查建议：\n"
-                "1) 查看「Latent Variables (Factor Loadings) & Covariances」是否有载荷行；\n"
-                "2) 确认选中的题目确实进入模型；\n"
-                "3) 重新运行一次 CFA 后再生成报告。"
+                "1) 查看上方 DEBUG 信息，确认「因子名」和「载荷键」是否对应；\n"
+                "2) 检查 factor_items 中的题目名和 estimates RHS 列的题目名是否一致；\n"
+                "3) 如果因子名不一致，请在「主因子名称」输入框中改为和模型一致的名字后重新运行。"
             )
             st.stop()
 
@@ -1950,7 +2067,6 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         st.error(f"生成报告时出错: {e}")
         import traceback
         st.code(traceback.format_exc())
-        
 
 
 # ########################
