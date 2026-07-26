@@ -1715,15 +1715,20 @@ def _extract_fit(fit_stats, key):
 def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_items, final_estimates, final_fit, fname, measure_id):
     """生成Excel报告并触发下载"""
     try:
+        # 映射到局部变量，与 n2 逻辑保持一致
         df_cfa = final_df_cfa.copy()
         factor_items = final_factor_items
         estimates = final_estimates
         stats_dict = final_fit
-        clean_to_orig = cfg["clean_to_orig"]
-
         mid = str(measure_id).strip() if measure_id else "measure"
 
-        # ✅ 把 _to_num 提到最前面定义
+        # 列名清洗函数（与 run_cfa_gui 中一致）
+        def _clean_col(name):
+            return re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(name))
+
+        # 建立原始列名到清洗后列名的映射（因为 estimates 中的 RHS 是清洗后的列名）
+        item_clean_map = {item: _clean_col(item) for item in factor_items}
+
         def _to_num(x):
             try:
                 if x is None:
@@ -1736,106 +1741,84 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             except (TypeError, ValueError):
                 return np.nan
 
-        # ============================================================
-        # 1. 统一清洗 estimates，防止隐藏空格导致匹配失败
-        # ============================================================
-        estimates_clean = estimates.copy()
-        for col in ['LHS', 'op', 'RHS']:
-            if col in estimates_clean.columns:
-                estimates_clean[col] = estimates_clean[col].astype(str).str.strip()
-        
-        fname_clean = str(fname).strip()
-        
-        # ============================================================
-        # 2. 提取潜变量方差 (trait_var)
-        # ============================================================
+        # 兼容不同来源/版本的拟合指标键名（大小写/符号不敏感）
+        def _norm_key(k):
+            return re.sub(r"[^a-z0-9]+", "", str(k).lower())
+
+        _stats_norm = {_norm_key(k): v for k, v in stats_dict.items()}
+
+        def _get_any(d, keys, default=np.nan):
+            for k in keys:
+                if k in d:
+                    v = _to_num(d.get(k))
+                    if not np.isnan(v):
+                        return v
+            for k in keys:
+                nk = _norm_key(k)
+                if nk in _stats_norm:
+                    v = _to_num(_stats_norm.get(nk))
+                    if not np.isnan(v):
+                        return v
+            return default
+
+        # 潜变量方差 (主因子)
         trait_var = np.nan
-        
-        latent_rows = estimates_clean[
-            (estimates_clean['op'] == "~~") & 
-            (estimates_clean['LHS'] == fname_clean) & 
-            (estimates_clean['RHS'] == fname_clean)
-        ]
-        if not latent_rows.empty:
-            trait_var = _to_num(latent_rows.iloc[0].get('Estimate', np.nan))
-        
-        # 忽略大小写兜底
-        if np.isnan(trait_var):
-            latent_rows = estimates_clean[
-                (estimates_clean['op'] == "~~") & 
-                (estimates_clean['LHS'].str.lower() == fname_clean.lower()) & 
-                (estimates_clean['RHS'].str.lower() == fname_clean.lower())
-            ]
-            if not latent_rows.empty:
-                trait_var = _to_num(latent_rows.iloc[0].get('Estimate', np.nan))
-        
-        # ============================================================
-        # 3. 提取非标准化 & 标准化载荷
-        # ============================================================
+        est = estimates
+        for _, row in est.iterrows():
+            if row.get("op") == "~~" and row.get("LHS") == fname and row.get("RHS") == fname:
+                trait_var = row.get("Estimate", np.nan)
+                break
+
+        # 载荷：兼容 semopy 两种常见表示
         loadings_unstd = {}
         loadings_std = {}
-        
-        trait_loadings = estimates_clean[
-            (estimates_clean['op'] == "=~") & 
-            (estimates_clean['LHS'] == fname_clean)
-        ]
-        if trait_loadings.empty:
-            trait_loadings = estimates_clean[
-                (estimates_clean['op'] == "=~") & 
-                (estimates_clean['LHS'].str.lower() == fname_clean.lower())
-            ]
-        if trait_loadings.empty:
-            trait_loadings = estimates_clean[
-                (estimates_clean['op'] == "~") & 
-                (estimates_clean['RHS'] == fname_clean)
-            ]
-        if trait_loadings.empty:
-            trait_loadings = estimates_clean[
-                (estimates_clean['op'] == "~") & 
-                (estimates_clean['RHS'].str.lower() == fname_clean.lower())
-            ]
-        
-        for _, row in trait_loadings.iterrows():
-            item_key = str(row['RHS']).strip()
-            loadings_unstd[item_key] = _to_num(row.get('Estimate', np.nan))
-            std_val = row.get('Std.all', row.get('Std. All', row.get('Est. Std', row.get('est.std', np.nan))))
-            loadings_std[item_key] = _to_num(std_val)
-        
-        # ============================================================
-        # 4. 计算 CR（直接用上面提取好的 trait_var 和 loadings_unstd）
-        # ============================================================
+        if {"LHS", "op", "RHS"}.issubset(est.columns):
+            trait_loadings = est[(est["op"] == "=~") & (est["LHS"] == fname)]
+            if not trait_loadings.empty:
+                for _, row in trait_loadings.iterrows():
+                    item_key = row["RHS"]
+                    loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in est.columns else np.nan
+                    loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in est.columns else np.nan
+            else:
+                trait_loadings = est[(est["op"] == "~") & (est["RHS"] == fname)]
+                for _, row in trait_loadings.iterrows():
+                    item_key = row["LHS"]
+                    loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in est.columns else np.nan
+                    loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in est.columns else np.nan
+
+        chi2_val = _get_any(stats_dict, ["chi2", "Chi2"])
+        dof_val = _get_any(stats_dict, ["DoF", "dof", "df"])
+        p_val = _get_any(stats_dict, ["chi2 p-value", "p-value", "pvalue", "p_value"])
+        alpha_val = cronbach_alpha(df_cfa) if not df_cfa.empty else np.nan
+
+        # Composite Reliability (CR)
         cr_val = np.nan
         cr_reason = ""
         try:
             sorted_items_for_cr = sort_item_cols_by_number(factor_items)
-            used_cols_for_cr = [c for c in sorted_items_for_cr if c in df_cfa.columns]
-
+            sorted_items_clean_for_cr = [item_clean_map.get(c, c) for c in sorted_items_for_cr]
+            used_cols_for_cr = [c for c in sorted_items_clean_for_cr if c in df_cfa.columns]
             if not used_cols_for_cr:
                 cr_reason = "CR 未计算：未找到用于 CR 的题目列。"
             else:
                 x_cr = df_cfa[used_cols_for_cr].apply(pd.to_numeric, errors="coerce").dropna(axis=0, how="any")
                 if x_cr.empty:
-                    cr_reason = "CR 未计算：用于 CR 的有效样本为空。"
+                    cr_reason = "CR 未计算：用于 CR 的有效样本为空（题目存在缺失/非数值）。"
                 else:
                     sigma_cr = x_cr.cov().values
                     s_vec = np.sqrt(np.diag(sigma_cr))
-                    
-                    # 用 strip 后的键匹配，防止空格问题
-                    loadings_unstd_stripped = {k.strip(): v for k, v in loadings_unstd.items()}
-                    
                     lambda_unstd_vec = np.array(
-                        [_to_num(loadings_unstd_stripped.get(c.strip(), np.nan)) for c in used_cols_for_cr],
+                        [_to_num(loadings_unstd.get(c, np.nan)) for c in used_cols_for_cr],
                         dtype=float,
                     )
                     phi_num = _to_num(trait_var)
-                    
                     if np.isnan(phi_num) or phi_num <= 0:
-                        cr_reason = f"CR 未计算：主因子方差 φ 缺失或非正数 (当前值: {trait_var})。"
+                        cr_reason = "CR 未计算：主因子方差 φ 缺失或非正数。"
                     elif np.isnan(lambda_unstd_vec).any():
                         miss_cols = [used_cols_for_cr[i] for i, v in enumerate(lambda_unstd_vec) if np.isnan(v)]
                         cr_reason = f"CR 未计算：以下题目缺少非标准化载荷：{', '.join(miss_cols[:6])}"
                     elif (not np.all(np.isfinite(s_vec))) or np.any(s_vec <= 0):
-                        cr_reason = "CR 未计算：题目标准差存在无效值。"
+                        cr_reason = "CR 未计算：题目标准差（来自协方差矩阵对角线）存在无效值。"
                     else:
                         lambda_std = (lambda_unstd_vec * np.sqrt(phi_num)) / s_vec
                         S = float(np.sum(lambda_std))
@@ -1844,58 +1827,43 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                         if np.isfinite(den) and den > 0:
                             cr_val = float((S ** 2) / den)
                         else:
-                            cr_reason = "CR 未计算：分母无效。"
+                            cr_reason = "CR 未计算：分母无效（可能由异常载荷导致）。"
         except Exception as cr_e:
             cr_val = np.nan
             cr_reason = f"CR 未计算：计算过程异常（{cr_e}）。"
-        
-        # ============================================================
-        # 5. 其他指标
-        # ============================================================
-        def _get_any(d, keys, default=np.nan):
-            for k in keys:
-                if k in d:
-                    v = _to_num(d.get(k))
-                    if not np.isnan(v):
-                        return v
-            return default
 
-        chi2_val = _get_any(stats_dict, ["chi2", "Chi2"])
-        dof_val = _get_any(stats_dict, ["DoF", "dof", "df"])
-        p_val = _get_any(stats_dict, ["chi2 p-value", "p-value", "pvalue", "p_value"])
-        alpha_val = cronbach_alpha(df_cfa) if not df_cfa.empty else np.nan
+        def _extract_item_number(item_name, item_clean_name, fallback_idx):
+            _, num_parsed, _ = parse_item_col(item_name)
+            if num_parsed is not None:
+                return num_parsed
+            _, num_clean_parsed, _ = parse_item_col(item_clean_name)
+            if num_clean_parsed is not None:
+                return num_clean_parsed
+            prefix_orig = str(item_name).split("_", 1)[0]
+            prefix_clean = str(item_clean_name).split("_", 1)[0]
+            m = re.search(r"(\d+)", prefix_orig)
+            if m:
+                return int(m.group(1))
+            m2 = re.search(r"(\d+)", prefix_clean)
+            if m2:
+                return int(m2.group(1))
+            return fallback_idx
 
-        # ============================================================
-        # 6. 构建题目明细表
-        # ============================================================
         sorted_items = sort_item_cols_by_number(factor_items)
         rows = []
-        
-        for idx, item_clean in enumerate(sorted_items, start=1):
-            item_raw = clean_to_orig.get(item_clean, item_clean)
-            _, num, text = parse_item_col(item_raw)
-            rev = 1 if _is_reverse_coded(item_raw) else 0
-            item_number = num if num is not None else idx
-
-            # 直接用提取好的字典取值
-            unstd_load = loadings_unstd.get(str(item_clean).strip(), np.nan)
-            std_load = loadings_std.get(str(item_clean).strip(), np.nan)
-
-            m = re.match(r'^(\d+)_(.*)$', item_raw)
-            if m:
-                item_number = int(m.group(1))
-                item_text = m.group(2).strip()
-            else:
-                item_text = text or item_raw
-
+        for idx, item in enumerate(sorted_items, start=1):
+            _, num, text = parse_item_col(item)
+            rev = 1 if _is_reverse_coded(item) else 0
+            item_clean = item_clean_map.get(item, item)
+            item_number = num if num is not None else _extract_item_number(item, item_clean, idx)
             rows.append({
                 "measure_id": mid,
                 "item_number": item_number,
-                "item_text": item_text,
+                "item_text": text or item,
                 "reverse": rev,
                 "variance_latent": trait_var,
-                "unstandardised_loading": unstd_load,
-                "standardised_loading": std_load,
+                "unstandardised_loading": loadings_unstd.get(item_clean, np.nan),
+                "standardised_loading": loadings_std.get(item_clean, np.nan),
                 "chi2_user_model": chi2_val,
                 "df_user_model": dof_val,
                 "p_value_user_model": p_val,
@@ -1906,7 +1874,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 "GFI": _get_any(stats_dict, ["GFI"]),
                 "AGFI": _get_any(stats_dict, ["AGFI"]),
                 "NFI": _get_any(stats_dict, ["NFI"]),
-                "LogL": _get_any(stats_dict, ["LogL", "logl", "LogLik", "loglik"]),
+                "LogL": _get_any(stats_dict, ["LogL", "logl", "LogLik", "loglik", "log_likelihood", "log-likelihood"]),
                 "AIC": _get_any(stats_dict, ["AIC"]),
                 "BIC": _get_any(stats_dict, ["BIC"]),
                 "SABIC": _get_any(stats_dict, ["SABIC"]),
@@ -1915,9 +1883,28 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 "cronbach_alpha": alpha_val,
                 "Composite Reliability (CR)": cr_val,
             })
-            
         sheet_items = pd.DataFrame(rows)
-        cov_matrix = df_cfa[factor_items].cov()
+
+        # 校验：如果载荷全空，阻断生成并给出明确提示
+        unstd_empty = sheet_items["unstandardised_loading"].isna().all()
+        std_empty = sheet_items["standardised_loading"].isna().all()
+        if unstd_empty and std_empty:
+            st.error(
+                "生成前校验未通过：`unstandardised_loading` 与 `standardised_loading` 全为空。"
+                "请先确认参数表中存在因子载荷行，并且题目列名与模型估计表可匹配后再生成。"
+            )
+            st.info(
+                "排查建议：\n"
+                "1) 查看「Latent Variables (Factor Loadings) & Covariances」是否有载荷行；\n"
+                "2) 确认选中的题目确实进入模型；\n"
+                "3) 重新运行一次 CFA 后再生成报告。"
+            )
+            st.stop()
+
+        # 协方差矩阵
+        sorted_items_clean = [item_clean_map.get(c, c) for c in sorted_items]
+        df_cfa_ordered = df_cfa[[c for c in sorted_items_clean if c in df_cfa.columns]]
+        cov_matrix = df_cfa_ordered.cov()
 
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="xlsxwriter") as w:
@@ -1926,11 +1913,14 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
         buf.seek(0)
 
         today = date.today().strftime("%Y-%m-%d")
-        safe_mid = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(measure_id)).strip(" .") or "measure"
-        filename = f"{safe_mid}_precfa_report_{today}.xlsx"
-        
+        safe_mid_for_file = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(mid)).strip(" .") or "measure"
+        user_name = st.session_state.get("user_name", "unknown_user")
+        safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
+        filename = f"{safe_mid_for_file}_precfa_report_{today}_{safe_user}.xlsx"
+
         st.session_state.n2_report_sheet_items_preview = sheet_items.copy()
         st.session_state.n2_report_cov_preview = cov_matrix.copy()
+        st.session_state.n2_cr_warning = cr_reason if (np.isnan(_to_num(cr_val)) and cr_reason) else ""
 
         st.markdown("##### 预览：题目明细表（前20行）")
         st.dataframe(
@@ -1943,7 +1933,10 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             st.session_state.n2_report_cov_preview.head(20),
             use_container_width=True,
         )
-        
+
+        if st.session_state.get("n2_cr_warning"):
+            st.warning(st.session_state.n2_cr_warning)
+
         st.download_button(
             label="⬇️ 点击下载 Excel 报告",
             data=buf.getvalue(),
@@ -1952,14 +1945,11 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             key=f"n2_{sub_name}_dl_excel",
         )
         st.success("报告已生成！")
-        
+
     except Exception as e:
         st.error(f"生成报告时出错: {e}")
         import traceback
         st.code(traceback.format_exc())
-    
-    
-
         
 
 
