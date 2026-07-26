@@ -2076,11 +2076,19 @@ def render_batch_cfa():
     st.subheader("📂 选择数据来源与 Measure")
     
     has_sub_datasets = 'sub_datasets' in st.session_state and len(st.session_state.sub_datasets) > 0
+    
+    # 🆕 更健壮的检测：不严格依赖 dc_merge_done，直接检查 dc_dataset_full 和 dc_measures
+    dc_full = st.session_state.get("dc_dataset_full")
+    dc_meas = st.session_state.get("dc_measures")
     has_dual_data = (
-        st.session_state.get("dc_merge_done")
-        and st.session_state.get("dc_dataset_full")
-        and st.session_state.get("dc_measures")
+        isinstance(dc_full, dict) and len(dc_full) > 0
+        and isinstance(dc_meas, dict) and len(dc_meas) > 0
     )
+    
+    # Debug 信息（如果你确认正常后可删除这 3 行）
+    # st.caption(f"Debug: sub={has_sub_datasets}, dual={has_dual_data}, "
+    #            f"dc_full_keys={list(dc_full.keys()) if isinstance(dc_full, dict) else 'N/A'}, "
+    #            f"dc_meas_keys={list(dc_meas.keys()) if isinstance(dc_meas, dict) else 'N/A'}")
     
     if not has_sub_datasets and not has_dual_data:
         st.warning("未检测到可用的数据源。请先前往 Data Cleaning 模块保存子数据集，或完成双数据集/四数据集清洗。")
@@ -2093,6 +2101,16 @@ def render_batch_cfa():
         source_options.append("💾 来自 Data Cleaning（四数据集）")
     
     data_source = st.radio("请选择数据来源:", source_options, horizontal=True, key="batch_data_source")
+    
+    # 🆕 切换数据源时自动重置 measure 配置，防止旧列名干扰新数据
+    last_src = st.session_state.get("batch_last_data_source")
+    if last_src != data_source:
+        st.session_state.batch_measures_config = {}
+        st.session_state.batch_last_data_source = data_source
+        # 同时清理之前运行的结果，避免残留
+        for k in list(st.session_state.keys()):
+            if k.startswith("batch_results") or k.startswith("batch_report_") or k.startswith("batch_scored_") or k.startswith("batch_formula_"):
+                del st.session_state[k]
     
     available_measures = {}
     
@@ -2134,7 +2152,6 @@ def render_batch_cfa():
             key="batch_dual_dataset"
         )
 
-
         measure_names = list(st.session_state.dc_measures.keys())
         if not measure_names:
             st.warning("请在数据清洗模块的「Measure 划分」中至少定义一个 Measure。")
@@ -2166,20 +2183,28 @@ def render_batch_cfa():
         
         # 清洗列名并按 Measure 拆分
         df_analysis.columns = [re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(c)) for c in df_analysis.columns]
+        
         for m_name in selected_measures:
             raw_cols = st.session_state.dc_measures.get(m_name, [])
             clean_cols = [re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(c)) for c in raw_cols]
             measure_cols = [c for c in clean_cols if c in df_analysis.columns]
-            if measure_cols:
-                df_m = df_analysis[measure_cols].apply(pd.to_numeric, errors='coerce').dropna(axis=1, how='all')
-                if not df_m.empty:
-                    available_measures[m_name] = {'df': df_m, 'items': df_m.columns.tolist()}
+            
+            # 🆕 如果匹配不到列，给出明确提示，方便排查
+            if not measure_cols:
+                st.warning(f"⚠️ Measure `{m_name}` 在 {selected_dataset} 中未匹配到任何有效列。原始列名: {raw_cols[:5]}...")
+                continue
+                
+            df_m = df_analysis[measure_cols].apply(pd.to_numeric, errors='coerce').dropna(axis=1, how='all')
+            if not df_m.empty:
+                available_measures[m_name] = {'df': df_m, 'items': df_m.columns.tolist()}
+            else:
+                st.warning(f"⚠️ Measure `{m_name}` 匹配到列但转换数值后为空，已跳过。")
 
         st.session_state.batch_data_source_type = "dual"
         st.session_state.batch_selected_dual_dataset = selected_dataset
         
     if not available_measures:
-        st.error("所选数据源中没有有效的数值列。")
+        st.error("所选数据源中没有有效的数值列。请检查 Data Cleaning 模块的 Measure 划分是否与数据列对应。")
         return
 
     st.success(f"已加载 **{len(available_measures)}** 个量表，共 **{sum(len(v['items']) for v in available_measures.values())}** 道题目。")
