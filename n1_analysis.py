@@ -1520,7 +1520,7 @@ def render_stage2_cfa_clean():
                 placeholder="如 LQ、EQ",
                 help="此 ID 将作为 N2_preCFA 中的键，并用于报告文件名。"
             )
-            col_btn, _ = st.columns([1, 3])
+            col_btn, _ = st.columns([1, 1])
             with col_btn:
                 if st.button("✅ 确认结果", key=f"n2_{sub_name}_lock_btn", use_container_width=True):
                     mid = measure_id_input.strip()
