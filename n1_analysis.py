@@ -1795,33 +1795,40 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
 
         # Composite Reliability (CR_F): 使用完全标准化载荷
         # lambda_std_i = lambda_i * sqrt(phi) / s_i, 其中 s_i 来自题目协方差矩阵 Sigma 的对角线
+        # Composite Reliability (CR_F)
         cr_val = np.nan
         cr_reason = ""
         try:
+            # factor_items 已经是清洗后的列名，无需再映射
             sorted_items_for_cr = sort_item_cols_by_number(factor_items)
-            sorted_items_clean_for_cr = [item_clean_map.get(c, c) for c in sorted_items_for_cr]
-            used_cols_for_cr = [c for c in sorted_items_clean_for_cr if c in df_cfa.columns]
+            used_cols_for_cr = [c for c in sorted_items_for_cr if c in df_cfa.columns]
+
             if not used_cols_for_cr:
                 cr_reason = "CR 未计算：未找到用于 CR 的题目列。"
             else:
                 x_cr = df_cfa[used_cols_for_cr].apply(pd.to_numeric, errors="coerce").dropna(axis=0, how="any")
                 if x_cr.empty:
-                    cr_reason = "CR 未计算：用于 CR 的有效样本为空（题目存在缺失/非数值）。"
+                    cr_reason = "CR 未计算：用于 CR 的有效样本为空。"
                 else:
                     sigma_cr = x_cr.cov().values
                     s_vec = np.sqrt(np.diag(sigma_cr))
+
+                    # 用 strip 后的键建立查找字典，防止首尾空格导致匹配失败
+                    loadings_unstd_stripped = {k.strip(): v for k, v in loadings_unstd.items()}
+
                     lambda_unstd_vec = np.array(
-                        [_to_num(loadings_unstd.get(c, np.nan)) for c in used_cols_for_cr],
+                        [_to_num(loadings_unstd_stripped.get(c.strip(), np.nan)) for c in used_cols_for_cr],
                         dtype=float,
                     )
-                    phi_num = _to_num(trait_var)
+                    phi_num = _to_num(trait_var)  # 直接用前面提取好的潜变量方差
+
                     if np.isnan(phi_num) or phi_num <= 0:
                         cr_reason = "CR 未计算：主因子方差 φ 缺失或非正数。"
                     elif np.isnan(lambda_unstd_vec).any():
                         miss_cols = [used_cols_for_cr[i] for i, v in enumerate(lambda_unstd_vec) if np.isnan(v)]
                         cr_reason = f"CR 未计算：以下题目缺少非标准化载荷：{', '.join(miss_cols[:6])}"
                     elif (not np.all(np.isfinite(s_vec))) or np.any(s_vec <= 0):
-                        cr_reason = "CR 未计算：题目标准差（来自协方差矩阵对角线）存在无效值。"
+                        cr_reason = "CR 未计算：题目标准差存在无效值。"
                     else:
                         lambda_std = (lambda_unstd_vec * np.sqrt(phi_num)) / s_vec
                         S = float(np.sum(lambda_std))
@@ -1830,7 +1837,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                         if np.isfinite(den) and den > 0:
                             cr_val = float((S ** 2) / den)
                         else:
-                            cr_reason = "CR 未计算：分母无效（可能由异常载荷导致）。"
+                            cr_reason = "CR 未计算：分母无效。"
         except Exception as cr_e:
             cr_val = np.nan
             cr_reason = f"CR 未计算：计算过程异常（{cr_e}）。"
