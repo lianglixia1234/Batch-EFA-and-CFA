@@ -1822,7 +1822,13 @@ def _extract_fit_val(fit_stats, key):
                     except:
                         pass
     return np.nan
-
+    if isinstance(key, list):
+        for k in key:
+            if k in fit_stats:
+                return fit_stats[k]
+        return np.nan
+    
+    return fit_stats.get(key, np.nan)
 
 def _run_cfa_and_extract(df, factor_name, factor_items, method_name, method_items):
     """运行CFA并提取关键指标，返回统一格式的结果字典"""
