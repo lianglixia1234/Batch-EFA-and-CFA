@@ -2999,7 +2999,1014 @@ def render_multi_cfa():
 # ==============================================================================
 # 批量 Multi-Factor CFA（基于 Single-Factor 确认结果）
 # ==============================================================================
+# ==============================================================================
+# 批量 Multi-Factor CFA 核心算法（基于 Single-Factor CFA 确认结果）
+# ==============================================================================
 
+def _run_multi_cfa_and_extract(df_clean, measure_items_map, method_items_by_measure):
+    """运行 Multi-factor Correlated CFA 并提取关键指标，返回统一格式的结果字典"""
+    # 构建带前缀的列名数据框（与 run_multifactor_cfa 期望的 measure_name__col_name 一致）
+    all_prefixed = {}
+    prefixed_method_items = []
+    dataset_names = list(measure_items_map.keys())
+
+    for m in dataset_names:
+        prefix = _sanitize_name(m) + "__"
+        for item in measure_items_map.get(m, []):
+            if item in df_clean.columns:
+                col_name = prefix + item
+                all_prefixed[col_name] = df_clean[item].values
+        for m_item in method_items_by_measure.get(m, []):
+            if m_item in measure_items_map.get(m, []) and m_item in df_clean.columns:
+                prefixed_method_items.append(prefix + m_item)
+
+    if not all_prefixed:
+        return None, "无有效列可构建 Multi-factor CFA 数据。"
+
+    df_multi = pd.DataFrame(all_prefixed)
+    df_multi = df_multi.apply(pd.to_numeric, errors='coerce')
+    df_multi = df_multi.dropna(axis=1, how='all')
+    df_multi = df_multi.dropna(axis=0, how='any')
+    df_multi = df_multi.replace([np.inf, -np.inf], np.nan).dropna()
+
+    if df_multi.empty or len(df_multi) < 10:
+        return None, f"有效样本量不足（<10）或数据为空。当前 {len(df_multi)} 行。"
+
+    prefixed_method_items = list(dict.fromkeys(prefixed_method_items))
+
+    model, estimates, stats_dict, err, syntax = run_multifactor_cfa(
+        df_multi, dataset_names, prefixed_method_items
+    )
+
+    if err:
+        return None, err
+
+    cfi = _get_any_stat(stats_dict, "CFI")
+    tli = _get_any_stat(stats_dict, "TLI")
+    rmsea = _get_any_stat(stats_dict, "RMSEA")
+    srmr = _get_any_stat(stats_dict, "SRMR")
+
+    per_measure_n = {m: len(measure_items_map.get(m, [])) for m in dataset_names}
+
+    return {
+        'result': (model, estimates, stats_dict),
+        'estimates': estimates,
+        'fit_stats': stats_dict,
+        'syntax': syntax,
+        'cfi': cfi,
+        'tli': tli,
+        'rmsea': rmsea,
+        'srmr': srmr,
+        'n_items': sum(per_measure_n.values()),
+        'per_measure_n': per_measure_n,
+        'measure_items_map': {k: list(v) for k, v in measure_items_map.items()},
+        'method_items_by_measure': {k: list(v) for k, v in method_items_by_measure.items()},
+        'method_items': prefixed_method_items,
+        'dataset_names': list(dataset_names),
+        'df_used': df_multi,
+    }, None
+
+
+def _try_all_deletions_multi(df_clean, measure_items_map, method_items_by_measure,
+                             min_items_per_measure, min_method_items):
+    """尝试删除每一个题目（按 measure），返回所有满足约束的有效结果"""
+    results = []
+    for m, items in measure_items_map.items():
+        for item in items:
+            new_measure_items = {}
+            valid = True
+            for mm, mitems in measure_items_map.items():
+                if mm == m:
+                    new_items = [i for i in mitems if i != item]
+                    if len(new_items) < min_items_per_measure:
+                        valid = False
+                        break
+                    new_measure_items[mm] = new_items
+                else:
+                    new_measure_items[mm] = list(mitems)
+
+            if not valid:
+                continue
+
+            new_method_items = {}
+            total_method = 0
+            for mm, mitems in method_items_by_measure.items():
+                if mm == m:
+                    new_mitems = [i for i in mitems if i != item]
+                    new_method_items[mm] = new_mitems
+                    total_method += len(new_mitems)
+                else:
+                    new_method_items[mm] = list(mitems)
+                    total_method += len(mitems)
+
+            if total_method < min_method_items:
+                continue
+
+            res, err = _run_multi_cfa_and_extract(df_clean, new_measure_items, new_method_items)
+            if err:
+                continue
+
+            res['deleted_item'] = item
+            res['deleted_from_measure'] = m
+            results.append(res)
+    return results
+
+
+def _score_for_stage1_multi(r, current_cfi, current_tli):
+    """Stage 1评分：优先保质量（0.90）"""
+    cfi, tli = r['cfi'], r['tli']
+    if np.isnan(cfi) or np.isnan(tli):
+        return -9999
+    if cfi >= 0.90 and tli >= 0.90:
+        return 10000 + cfi * 100 + tli * 100 - r['n_items'] * 10
+    gap_before = max(0, 0.90 - current_cfi) + max(0, 0.90 - current_tli)
+    gap_after = max(0, 0.90 - cfi) + max(0, 0.90 - tli)
+    improvement = gap_before - gap_after
+    if improvement <= 0 and (current_cfi < 0.90 or current_tli < 0.90):
+        return improvement * 100 - 500
+    return improvement * 1000 + cfi * 10 + tli * 10
+
+
+def _score_for_stage2_multi(r, current_cfi, current_tli):
+    """Stage 2评分：优先求精简（0.95），但不能破坏0.90底线"""
+    cfi, tli = r['cfi'], r['tli']
+    if np.isnan(cfi) or np.isnan(tli):
+        return -9999
+    if cfi < 0.90 or tli < 0.90:
+        return -9999
+    if cfi >= 0.95 and tli >= 0.95:
+        return 10000 + cfi * 100 + tli * 100 - r['n_items'] * 50
+    gap_before = max(0, 0.95 - current_cfi) + max(0, 0.95 - current_tli)
+    gap_after = max(0, 0.95 - cfi) + max(0, 0.95 - tli)
+    improvement = gap_before - gap_after
+    if improvement <= 0 and (current_cfi >= 0.95 and current_tli >= 0.95):
+        return -1000
+    return improvement * 1000 + cfi * 10 + tli * 10
+
+
+def run_auto_multi_cfa_two_stages(
+    df_clean,
+    measure_items_map,
+    method_items_by_measure,
+    min_items_limit=5,
+    target_n=8,
+    min_method_items=3,
+    target_method_n=3,
+):
+    """
+    两阶段自动删题 Multi-Factor Correlated CFA。
+    返回: {
+        'stage1': {'history': [...], 'final': result_dict},
+        'stage2': {'history': [...], 'final': result_dict},
+        'error': None or str
+    }
+    """
+    # ==================== 初始模型 ====================
+    res, err = _run_multi_cfa_and_extract(df_clean, measure_items_map, method_items_by_measure)
+    if err:
+        return {'stage1': None, 'stage2': None, 'error': f"初始模型失败: {err}"}
+
+    # ==================== Stage 1: 保质量 ====================
+    s1_measure_items = {k: list(v) for k, v in measure_items_map.items()}
+    s1_method_items = {k: list(v) for k, v in method_items_by_measure.items()}
+    s1_history = []
+
+    s1_history.append({
+        'round': 0, 'action': '初始模型（全题目）', 'deleted_item': None,
+        'measure_items_map': {k: list(v) for k, v in s1_measure_items.items()},
+        'n_items': res['n_items'], 'per_measure_n': dict(res['per_measure_n']),
+        'cfi': res['cfi'], 'tli': res['tli'], 'rmsea': res['rmsea'], 'srmr': res['srmr'],
+        'result': res['result'], 'estimates': res['estimates'], 'syntax': res['syntax'],
+    })
+
+    best_overall = res
+    best_score = res['cfi'] + res['tli']
+
+    if not (res['cfi'] >= 0.90 and res['tli'] >= 0.90):
+        round_num = 1
+        while round_num <= 50:
+            can_delete = any(len(items) > min_items_limit for items in s1_measure_items.values())
+            if not can_delete:
+                break
+
+            test_results = _try_all_deletions_multi(
+                df_clean, s1_measure_items, s1_method_items,
+                min_items_limit, min_method_items
+            )
+            if not test_results:
+                break
+
+            for r in test_results:
+                r['score'] = _score_for_stage1_multi(r, res['cfi'], res['tli'])
+
+            valid = [r for r in test_results if r['score'] > -1000]
+            if not valid:
+                break
+
+            valid.sort(key=lambda x: x['score'], reverse=True)
+            best = valid[0]
+
+            if best['score'] < 0 and (res['cfi'] < 0.90 or res['tli'] < 0.90):
+                break
+
+            del_m = best['deleted_from_measure']
+            del_item = best['deleted_item']
+            s1_measure_items[del_m] = [i for i in s1_measure_items[del_m] if i != del_item]
+            if del_item in s1_method_items.get(del_m, []):
+                s1_method_items[del_m] = [i for i in s1_method_items[del_m] if i != del_item]
+
+            res = best
+            s1_history.append({
+                'round': round_num, 'action': f'删除 {del_item}（来自 {del_m}）',
+                'deleted_item': del_item, 'deleted_from_measure': del_m,
+                'measure_items_map': {k: list(v) for k, v in s1_measure_items.items()},
+                'n_items': best['n_items'], 'per_measure_n': dict(best['per_measure_n']),
+                'cfi': best['cfi'], 'tli': best['tli'],
+                'rmsea': best['rmsea'], 'srmr': best['srmr'],
+                'result': best['result'], 'estimates': best['estimates'],
+                'syntax': best['syntax'],
+            })
+
+            if best['cfi'] + best['tli'] > best_score:
+                best_score = best['cfi'] + best['tli']
+                best_overall = best
+
+            if best['cfi'] >= 0.90 and best['tli'] >= 0.90:
+                break
+
+            round_num += 1
+
+    stage1_final = best_overall
+
+    # ==================== Stage 2: 求精简 ====================
+    s2_measure_items = {k: list(v) for k, v in stage1_final['measure_items_map'].items()}
+    s2_method_items = {k: list(v) for k, v in stage1_final.get('method_items_by_measure', {}).items()}
+    s2_history = []
+
+    res2, err2 = _run_multi_cfa_and_extract(df_clean, s2_measure_items, s2_method_items)
+    if err2:
+        return {
+            'stage1': {'history': s1_history, 'final': stage1_final},
+            'stage2': {'history': [], 'final': None},
+            'error': f"Stage 2 初始模型失败: {err2}"
+        }
+
+    s2_history.append({
+        'round': 0, 'action': '承接 Stage 1 最终题目', 'deleted_item': None,
+        'measure_items_map': {k: list(v) for k, v in s2_measure_items.items()},
+        'n_items': res2['n_items'], 'per_measure_n': dict(res2['per_measure_n']),
+        'cfi': res2['cfi'], 'tli': res2['tli'], 'rmsea': res2['rmsea'], 'srmr': res2['srmr'],
+        'result': res2['result'], 'estimates': res2['estimates'], 'syntax': res2['syntax'],
+    })
+
+    best_overall2 = res2
+    best_score2 = res2['cfi'] + res2['tli']
+
+    already_high = res2['cfi'] >= 0.95 and res2['tli'] >= 0.95
+    already_compact = all(n <= target_n for n in res2['per_measure_n'].values()) and \
+                      sum(len(v) for v in s2_method_items.values()) <= target_method_n
+
+    if not (already_high or already_compact):
+        round_num = 1
+        while round_num <= 50:
+            can_delete = any(len(items) > min_items_limit for items in s2_measure_items.values())
+            if not can_delete:
+                break
+
+            test_results = _try_all_deletions_multi(
+                df_clean, s2_measure_items, s2_method_items,
+                min_items_limit, min_method_items
+            )
+            if not test_results:
+                break
+
+            for r in test_results:
+                r['score'] = _score_for_stage2_multi(r, res2['cfi'], res2['tli'])
+
+            valid = [r for r in test_results if r['score'] > -1000]
+            if not valid:
+                break
+
+            valid.sort(key=lambda x: x['score'], reverse=True)
+            best = valid[0]
+
+            if best['score'] < 0:
+                break
+
+            del_m = best['deleted_from_measure']
+            del_item = best['deleted_item']
+            s2_measure_items[del_m] = [i for i in s2_measure_items[del_m] if i != del_item]
+            if del_item in s2_method_items.get(del_m, []):
+                s2_method_items[del_m] = [i for i in s2_method_items[del_m] if i != del_item]
+
+            res2 = best
+            s2_history.append({
+                'round': round_num, 'action': f'删除 {del_item}（来自 {del_m}）',
+                'deleted_item': del_item, 'deleted_from_measure': del_m,
+                'measure_items_map': {k: list(v) for k, v in s2_measure_items.items()},
+                'n_items': best['n_items'], 'per_measure_n': dict(best['per_measure_n']),
+                'cfi': best['cfi'], 'tli': best['tli'],
+                'rmsea': best['rmsea'], 'srmr': best['srmr'],
+                'result': best['result'], 'estimates': best['estimates'],
+                'syntax': best['syntax'],
+            })
+
+            if best['cfi'] + best['tli'] > best_score2:
+                best_score2 = best['cfi'] + best['tli']
+                best_overall2 = best
+
+            stop_cond1 = best['cfi'] >= 0.95 and best['tli'] >= 0.95
+            stop_cond2 = all(n <= target_n for n in best['per_measure_n'].values()) and \
+                         sum(len(v) for v in s2_method_items.values()) <= target_method_n
+            if stop_cond1 or stop_cond2:
+                break
+
+            round_num += 1
+
+    stage2_final = best_overall2
+
+    return {
+        'stage1': {'history': s1_history, 'final': stage1_final},
+        'stage2': {'history': s2_history, 'final': stage2_final},
+        'error': None,
+    }
+
+
+# ==============================================================================
+# 批量 Multi-Factor CFA 页面（完整版）
+# ==============================================================================
+
+def render_batch_multi_cfa():
+    st.markdown("""
+    本模块基于 **Single-Factor CFA** 的确认结果，批量运行 **Multi-Factor Correlated CFA** 自动删题。
+    - *Stage 1（保质量）*：保证 CFI ≥ 0.90、TLI ≥ 0.90，未达标自动删题
+    - *Stage 2（求精简）*：追求 CFI ≥ 0.95、TLI ≥ 0.95，同时精简每个 Measure 至目标题数
+    """)
+
+    # ==========================================================
+    # 0. 检查前置条件
+    # ==========================================================
+    confirmed_measures = list(st.session_state.get("batch_confirmed", {}).keys())
+    if not confirmed_measures:
+        st.warning("未检测到 Single-Factor CFA 的确认结果。请先完成 Single-Factor CFA 批量分析并点击「✅ 确认采用」。")
+        return
+
+    if "batch_df_numeric" not in st.session_state or st.session_state.batch_df_numeric is None:
+        st.warning("未检测到 Single-Factor CFA 的原始数据。请先完成 Single-Factor CFA 批量分析。")
+        return
+
+    base_df = st.session_state.batch_df_numeric.copy()
+
+    # ==========================================================
+    # 1. 创建 Measure Group
+    # ==========================================================
+    st.subheader("📂 创建 Measure Group")
+    st.caption("从已确认的 Single-Factor CFA Measure 中挑选，组合成 Multi-Factor CFA 的 Measure Group。")
+
+    if "n4_multi_groups" not in st.session_state:
+        st.session_state.n4_multi_groups = []
+    if "n4_multi_results" not in st.session_state:
+        st.session_state.n4_multi_results = {}
+    if "n4_multi_confirmed" not in st.session_state:
+        st.session_state.n4_multi_confirmed = {}
+
+    col_g1, col_g2, col_g3, col_g4 = st.columns([2, 2, 1, 1])
+    with col_g1:
+        group_name = st.text_input("Measure Group 名称", key="n4_new_group_name", placeholder="如：Wellbeing_Battery")
+    with col_g2:
+        selected_measures = st.multiselect(
+            "选择 Single-CFA Measure",
+            options=confirmed_measures,
+            default=[],
+            key="n4_new_group_measures",
+        )
+    with col_g3:
+        N_multi = st.number_input("N_multi（每Measure目标题数）", min_value=3, max_value=50, value=8, step=1, key="n4_new_N_multi")
+    with col_g4:
+        n_multi = st.number_input("n_multi（方法因子目标题数）", min_value=0, max_value=50, value=3, step=1, key="n4_new_n_multi")
+
+    if st.button("➕ 添加 Measure Group", key="n4_add_group"):
+        if not group_name or not group_name.strip():
+            st.error("请输入 Group 名称。")
+        elif not selected_measures:
+            st.error("请至少选择一个 Measure。")
+        elif group_name.strip() in [g["name"] for g in st.session_state.n4_multi_groups]:
+            st.error("Group 名称已存在，请更换。")
+        else:
+            st.session_state.n4_multi_groups.append({
+                "name": group_name.strip(),
+                "measures": list(selected_measures),
+                "N_multi": int(N_multi),
+                "n_multi": int(n_multi),
+            })
+            st.success(f"已创建 Group：{group_name.strip()}")
+            st.rerun()
+
+    # ==========================================================
+    # 2. 显示已创建的 Groups
+    # ==========================================================
+    if not st.session_state.n4_multi_groups:
+        st.info("请至少创建一个 Measure Group 后再继续。")
+        return
+
+    st.markdown("---")
+    st.markdown("#### 已创建的 Measure Groups")
+    for i, g in enumerate(st.session_state.n4_multi_groups):
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            st.write(f"**{g['name']}**：{', '.join(g['measures'])} | N_multi={g['N_multi']} | n_multi={g['n_multi']}")
+        with c2:
+            if st.button("🗑️ 删除", key=f"n4_del_group_{i}"):
+                st.session_state.n4_multi_groups.pop(i)
+                st.session_state.n4_multi_results.pop(g["name"], None)
+                st.session_state.n4_multi_confirmed.pop(g["name"], None)
+                st.rerun()
+
+    # ==========================================================
+    # 3. 以 Tabs 检查模型结构
+    # ==========================================================
+    st.markdown("---")
+    st.subheader("🔧 检查模型结构（Model Configuration）")
+    st.caption("每个 Tab 对应一个 Measure Group。系统已自动导入 Single-CFA 保留题目与方法因子题目，请确认或微调。")
+
+    group_tabs = st.tabs([f"📋 {g['name']}" for g in st.session_state.n4_multi_groups])
+
+    for idx, group in enumerate(st.session_state.n4_multi_groups):
+        with group_tabs[idx]:
+            measure_items_map = {}
+            method_items_by_measure = {}
+
+            for m in group["measures"]:
+                if m not in st.session_state.batch_confirmed:
+                    st.error(f"Measure `{m}` 无确认结果。")
+                    continue
+                confirmed = st.session_state.batch_confirmed[m]
+                items = list(confirmed["final"]["items"])
+                measure_items_map[m] = items
+
+                cfg = st.session_state.get("batch_measures_config", {}).get(m, {})
+                orig_method = cfg.get("method_items", [])
+                method_items_m = [item for item in orig_method if item in items]
+                method_items_by_measure[m] = method_items_m
+
+            st.markdown("##### 各 Measure 题目清单")
+            for m, items in measure_items_map.items():
+                method_m = method_items_by_measure.get(m, [])
+                st.write(f"**{m}**：{len(items)} 题（方法因子：{len(method_m)} 题）")
+                st.caption(", ".join(items[:15]) + ("..." if len(items) > 15 else ""))
+
+            st.markdown("##### 方法因子题目微调（可选）")
+            for m in group["measures"]:
+                if m not in measure_items_map:
+                    continue
+                current_method = method_items_by_measure.get(m, [])
+                available = measure_items_map[m]
+                pick = st.multiselect(
+                    f"{m} 的方法因子题目",
+                    options=available,
+                    default=current_method,
+                    key=f"n4_group_{group['name']}_method_{m}",
+                )
+                method_items_by_measure[m] = [x for x in pick if x in available]
+
+            if st.button(f"✅ 确认 {group['name']} 配置", key=f"n4_confirm_cfg_{group['name']}"):
+                st.session_state[f"n4_cfg_{group['name']}"] = {
+                    "measure_items_map": measure_items_map,
+                    "method_items_by_measure": method_items_by_measure,
+                }
+                st.success(f"{group['name']} 配置已确认，可一键批量运行。")
+
+    # ==========================================================
+    # 4. 一键批量运行
+    # ==========================================================
+    st.markdown("---")
+    run_col, prelim_col = st.columns([1, 1])
+    with run_col:
+        run_clicked = st.button("🚀 一键批量运行自动删题 Multi-Factor CFA", type="primary", key="n4_run_multi_cfa")
+    with prelim_col:
+        if "n4_prelim" not in st.session_state:
+            st.session_state.n4_prelim = False
+        prelim_checked = st.checkbox(
+            "当前为 preliminary CFA", value=st.session_state.n4_prelim, key="n4_prelim_checkbox"
+        )
+        st.session_state.n4_prelim = prelim_checked
+
+    if run_clicked:
+        for group in st.session_state.n4_multi_groups:
+            cfg_key = f"n4_cfg_{group['name']}"
+            if cfg_key not in st.session_state:
+                st.error(f"请先在上方的「检查模型结构」中确认 `{group['name']}` 的配置。")
+                return
+
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        total = len(st.session_state.n4_multi_groups)
+
+        for idx, group in enumerate(st.session_state.n4_multi_groups):
+            status_text.markdown(f"⏳ **正在计算 ({idx+1}/{total})**：`{group['name']}` 的自动删题 Multi-Factor CFA...")
+
+            cfg = st.session_state[f"n4_cfg_{group['name']}"]
+            measure_items_map = cfg["measure_items_map"]
+            method_items_by_measure = cfg["method_items_by_measure"]
+
+            result = run_auto_multi_cfa_two_stages(
+                base_df,
+                measure_items_map,
+                method_items_by_measure,
+                min_items_limit=5,
+                target_n=group["N_multi"],
+                min_method_items=max(1, group["n_multi"] - 2) if group["n_multi"] > 0 else 0,
+                target_method_n=group["n_multi"],
+            )
+            st.session_state.n4_multi_results[group["name"]] = result
+            progress_bar.progress((idx + 1) / total)
+
+        status_text.success("🎉 所有 Measure Group 的 Multi-Factor CFA 自动删题分析完成！")
+        st.session_state.n4_multi_confirmed = {}
+
+    # ==========================================================
+    # 5. 结果展示
+    # ==========================================================
+    if not st.session_state.get("n4_multi_results"):
+        return
+
+    st.markdown("---")
+    st.subheader("📊 分析结果")
+
+    result_tabs = st.tabs([f"📈 {g['name']}" for g in st.session_state.n4_multi_groups])
+
+    for idx, group in enumerate(st.session_state.n4_multi_groups):
+        with result_tabs[idx]:
+            res = st.session_state.n4_multi_results.get(group["name"])
+            if res is None or res.get('error'):
+                st.error(f"❌ `{group['name']}` 分析失败：{res.get('error', '未知错误') if res else '无结果'}")
+                continue
+
+            s1 = res['stage1']
+            s2 = res['stage2']
+            s1_final = s1['final'] if s1 else None
+            s2_final = s2['final'] if s2 else None
+
+            # ---- 5.1 两个标准的对比表格 ----
+            st.markdown("##### 📋 两个标准结果对比")
+            compare_data = []
+            if s1_final:
+                row = {
+                    "标准": "标准1（保质量 0.90）",
+                    "总题数": s1_final['n_items'],
+                    "CFI": f"{s1_final['cfi']:.3f}" if not np.isnan(s1_final['cfi']) else "N/A",
+                    "TLI": f"{s1_final['tli']:.3f}" if not np.isnan(s1_final['tli']) else "N/A",
+                    "RMSEA": f"{s1_final['rmsea']:.3f}" if not np.isnan(s1_final['rmsea']) else "N/A",
+                    "SRMR": f"{s1_final['srmr']:.3f}" if not np.isnan(s1_final['srmr']) else "N/A",
+                }
+                for m, n in s1_final['per_measure_n'].items():
+                    row[f"{m} 题数"] = n
+                compare_data.append(row)
+            if s2_final:
+                row = {
+                    "标准": "标准2（求精简 0.95）",
+                    "总题数": s2_final['n_items'],
+                    "CFI": f"{s2_final['cfi']:.3f}" if not np.isnan(s2_final['cfi']) else "N/A",
+                    "TLI": f"{s2_final['tli']:.3f}" if not np.isnan(s2_final['tli']) else "N/A",
+                    "RMSEA": f"{s2_final['rmsea']:.3f}" if not np.isnan(s2_final['rmsea']) else "N/A",
+                    "SRMR": f"{s2_final['srmr']:.3f}" if not np.isnan(s2_final['srmr']) else "N/A",
+                }
+                for m, n in s2_final['per_measure_n'].items():
+                    row[f"{m} 题数"] = n
+                compare_data.append(row)
+
+            compare_df = pd.DataFrame(compare_data)
+            st.dataframe(compare_df, use_container_width=True, hide_index=True)
+
+            # ---- 5.2 Stage 1 / Stage 2 详细结果 ----
+            detail_tabs = st.tabs(["标准1（保质量）详情", "标准2（求精简）详情"])
+
+            for tab_idx, (tab_name, stage_data, stage_key) in enumerate([
+                ("标准1", s1, 'stage1'),
+                ("标准2", s2, 'stage2')
+            ]):
+                with detail_tabs[tab_idx]:
+                    if stage_data is None or stage_data['final'] is None:
+                        st.info("该标准无有效结果。")
+                        continue
+
+                    history = stage_data['history']
+                    final = stage_data['final']
+
+                    # 删题路径
+                    st.markdown("###### 📝 自动删题路径")
+                    if len(history) > 1:
+                        log_rows = []
+                        for h in history:
+                            row = {
+                                '轮次': h['round'],
+                                '操作': h['action'],
+                                '删除题目': h['deleted_item'] or '-',
+                                '来源Measure': h.get('deleted_from_measure', '-'),
+                                '总题数': h['n_items'],
+                                'CFI': f"{h['cfi']:.3f}" if not np.isnan(h['cfi']) else "N/A",
+                                'TLI': f"{h['tli']:.3f}" if not np.isnan(h['tli']) else "N/A",
+                            }
+                            for m, n in h['per_measure_n'].items():
+                                row[f"{m} 题数"] = n
+                            log_rows.append(row)
+                        log_df = pd.DataFrame(log_rows)
+                        st.dataframe(log_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.write("无删题记录（模型首次即达标）。")
+
+                    # 关键指标
+                    st.markdown("###### 🏆 关键模型拟合指标")
+                    metrics = {
+                        "CFI": final['cfi'], "TLI": final['tli'],
+                        "RMSEA": final['rmsea'], "SRMR": final['srmr'],
+                    }
+                    m_cols = st.columns(4)
+                    for i, (k, v) in enumerate(metrics.items()):
+                        display = f"{v:.3f}" if not np.isnan(v) else "N/A"
+                        m_cols[i].metric(label=k, value=display)
+
+                    fit_stats = final['fit_stats']
+                    more_metrics = {
+                        "Chi-Square (User Model)": _get_any_stat(fit_stats, ['chi2', 'Chi2']),
+                        "AIC": _get_any_stat(fit_stats, ['AIC']),
+                        "BIC": _get_any_stat(fit_stats, ['BIC']),
+                        "SABIC": _get_any_stat(fit_stats, ['SABIC']),
+                    }
+                    m_cols2 = st.columns(4)
+                    for i, (k, v) in enumerate(more_metrics.items()):
+                        display = f"{v:.3f}" if not np.isnan(v) else "N/A"
+                        m_cols2[i].metric(label=k, value=display)
+
+                    # 参数估计表
+                    st.markdown("###### 📄 详细参数估计 (Estimates)")
+                    est_df = final['estimates'].copy()
+                    if est_df is not None and not est_df.empty:
+                        numeric_cols = est_df.select_dtypes(include=[np.number]).columns
+                        format_dict = {col: "{:.3f}" for col in numeric_cols}
+                        display_cols = ['LHS', 'op', 'RHS', 'Estimate', 'Std.Err', 'z-value', 'P(>|z|)', 'Std.all']
+                        final_cols = [c for c in display_cols if c in est_df.columns]
+                        st.dataframe(est_df[final_cols].style.format(format_dict))
+
+                        csv = est_df.to_csv(index=False).encode('utf-8-sig')
+                        st.download_button("📥 下载参数估计表", csv, "multi_cfa_estimates.csv", "text/csv",
+                                           key=f"n4_dl_est_{group['name']}_{tab_idx}")
+
+                    with st.expander("查看模型语法"):
+                        st.code(final['syntax'], language="text")
+
+            # ---- 5.3 底部：选择标准 + 确认按钮 ----
+            st.markdown("---")
+            st.markdown("##### 🔒 确认采用标准")
+
+            adopt_options = []
+            if s1_final:
+                adopt_options.append(("标准1（保质量 0.90）", "stage1"))
+            if s2_final:
+                adopt_options.append(("标准2（求精简 0.95）", "stage2"))
+
+            if not adopt_options:
+                st.warning("无可用标准供选择。")
+                continue
+
+            current_confirmed = st.session_state.n4_multi_confirmed.get(group["name"], {})
+            default_label = adopt_options[0][0]
+            if current_confirmed.get('stage') == 'stage2' and len(adopt_options) > 1:
+                default_label = adopt_options[1][0]
+
+            selected_label = st.radio(
+                f"请选择 `{group['name']}` 采用的标准：",
+                options=[opt[0] for opt in adopt_options],
+                index=[opt[0] for opt in adopt_options].index(default_label),
+                key=f"n4_adopt_radio_{group['name']}",
+                horizontal=True
+            )
+            selected_stage = [opt[1] for opt in adopt_options if opt[0] == selected_label][0]
+
+            confirm_clicked = st.button(
+                f"✅ 确认采用 {selected_label}",
+                key=f"n4_confirm_btn_{group['name']}",
+                use_container_width=True
+            )
+
+            if confirm_clicked:
+                stage_data = res.get(selected_stage)
+                if stage_data and stage_data['final']:
+                    final = stage_data['final']
+                    st.session_state.n4_multi_confirmed[group["name"]] = {
+                        'stage': selected_stage,
+                        'stage_label': selected_label,
+                        'final': final,
+                        'group': group,
+                    }
+                    st.success(f"✅ 已确认 `{group['name']}` 采用 **{selected_label}**，总题数 **{final['n_items']}**，CFI **{final['cfi']:.3f}**，TLI **{final['tli']:.3f}**。")
+                    st.rerun()
+
+            # ---- 5.4 如果已确认，显示下载区域 ----
+            if group["name"] in st.session_state.n4_multi_confirmed:
+                confirmed = st.session_state.n4_multi_confirmed[group["name"]]
+                final = confirmed['final']
+
+                st.markdown("---")
+                st.markdown("##### 📥 下载已确认结果")
+
+                measuregroup_title = st.text_input(
+                    "measuregroup_title（用于文件命名）",
+                    value=group["name"],
+                    key=f"n4_mgid_{group['name']}"
+                )
+
+                # 生成报告按钮
+                if st.button(f"📊 生成 Multi-Factor Excel 报告", key=f"n4_gen_report_{group['name']}"):
+                    try:
+                        cfa_df = final['df_used']
+                        dataset_names = final['dataset_names']
+                        estimates = final['estimates']
+                        stats_dict = final['fit_stats']
+                        latent_display_names = dataset_names
+
+                        items_sheet, latent_cov, item_cov, cr_warning_msg = _build_multifactor_report_tables(
+                            cfa_df,
+                            dataset_names,
+                            estimates,
+                            stats_dict,
+                            latent_display_names,
+                            measuregroup_title,
+                        )
+
+                        xbuf = io.BytesIO()
+                        with pd.ExcelWriter(xbuf, engine="xlsxwriter") as w:
+                            sh1 = (measuregroup_title[:31] if len(measuregroup_title) > 31 else measuregroup_title) or "Model"
+                            sh1 = "".join(c for c in sh1 if c not in '[]:*?/\\')
+                            sh2_base = (measuregroup_title + "_latent_cov")
+                            sh2 = (sh2_base[:31] if len(sh2_base) > 31 else sh2_base) or "Model_cov"
+                            sh2 = "".join(c for c in sh2 if c not in '[]:*?/\\')
+                            sh3_base = (measuregroup_title + "_item_cov")
+                            sh3 = (sh3_base[:31] if len(sh3_base) > 31 else sh3_base) or "Model_item_cov"
+                            sh3 = "".join(c for c in sh3 if c not in '[]:*?/\\')
+                            items_sheet.to_excel(w, sheet_name=sh1, index=False)
+                            latent_cov.to_excel(w, sheet_name=sh2, index=True)
+                            item_cov.to_excel(w, sheet_name=sh3, index=True)
+                        xbuf.seek(0)
+
+                        cfa_type = "prelim_multi_cfa" if st.session_state.get("n4_prelim") else "multi_cfa"
+                        safe_mgid = _safe_filename_part(measuregroup_title, "measuregroup")
+                        today = date.today().strftime("%Y-%m-%d")
+                        user_name = st.session_state.get("user_name", "unknown_user")
+                        safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
+                        filename = f"{safe_mgid}_{cfa_type}_report_{today}_{safe_user}.xlsx"
+
+                        st.session_state[f"n4_report_bytes_{group['name']}"] = xbuf.getvalue()
+                        st.session_state[f"n4_report_filename_{group['name']}"] = filename
+                        st.session_state[f"n4_report_preview_{group['name']}"] = items_sheet.copy()
+                        st.session_state[f"n4_report_cov_preview_{group['name']}"] = latent_cov.copy()
+                        st.session_state[f"n4_report_item_cov_preview_{group['name']}"] = item_cov.copy()
+                        st.session_state[f"n4_cr_warning_{group['name']}"] = cr_warning_msg or ""
+                        st.success("✅ Multi-Factor Excel 报告已生成！")
+                    except Exception as e:
+                        st.error(f"生成报告失败: {e}")
+                        import traceback
+                        st.code(traceback.format_exc())
+
+                # 显示预览和下载
+                if st.session_state.get(f"n4_report_preview_{group['name']}") is not None:
+                    st.markdown("###### 预览：题目明细表（前20行）")
+                    st.dataframe(st.session_state[f"n4_report_preview_{group['name']}"].head(20), use_container_width=True)
+
+                    if st.session_state.get(f"n4_cr_warning_{group['name']}"):
+                        st.warning(st.session_state[f"n4_cr_warning_{group['name']}"])
+
+                    if st.session_state.get(f"n4_report_cov_preview_{group['name']}") is not None:
+                        st.markdown("###### 预览：潜变量方差-协方差矩阵（前20行）")
+                        st.dataframe(st.session_state[f"n4_report_cov_preview_{group['name']}"].head(20), use_container_width=True)
+
+                    if st.session_state.get(f"n4_report_item_cov_preview_{group['name']}") is not None:
+                        st.markdown("###### 预览：题目方差-协方差矩阵（前20行）")
+                        st.dataframe(st.session_state[f"n4_report_item_cov_preview_{group['name']}"].head(20), use_container_width=True)
+
+                    if st.session_state.get(f"n4_report_bytes_{group['name']}"):
+                        st.download_button(
+                            "⬇️ 下载 Multi-Factor Excel 报告",
+                            data=st.session_state[f"n4_report_bytes_{group['name']}"],
+                            file_name=st.session_state.get(f"n4_report_filename_{group['name']}", "report.xlsx"),
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"n4_dl_report_{group['name']}"
+                        )
+
+                # ==========================================================
+                # 🧮 最终得分计算（基于 Multi-factor Correlated Model）
+                # ==========================================================
+                st.markdown("---")
+                st.markdown("##### 🧮 最终得分计算（基于 Multi-factor Correlated Model）")
+                st.caption("输出每个潜变量报告分（Output A）以及 Overall relative final score（Output B）与 absolute final score（0-100）。")
+
+                sc1, sc2 = st.columns(2)
+                with sc1:
+                    n4_scale_min = st.number_input("scale_min", min_value=0, value=1, step=1,
+                                                   key=f"n4_smin_{group['name']}")
+                with sc2:
+                    n4_scale_max = st.number_input("scale_max", min_value=1, value=7, step=1,
+                                                   key=f"n4_smax_{group['name']}")
+
+                if int(n4_scale_min) >= int(n4_scale_max):
+                    st.error("scale_min 必须小于 scale_max。")
+
+                if st.button(f"🧮 计算最终得分并生成数据集", key=f"n4_calc_score_{group['name']}"):
+                    try:
+                        cfa_df_score = final['df_used']
+                        dataset_names_score = final['dataset_names']
+                        est_score = final['estimates']
+                        scored_df, n_missing_rows = _compute_multifactor_final_scores(
+                            cfa_df_score,
+                            dataset_names_score,
+                            est_score,
+                            scale_min=int(n4_scale_min),
+                            scale_max=int(n4_scale_max),
+                        )
+
+                        st.session_state[f"n4_scored_df_{group['name']}"] = scored_df
+
+                        csv_bytes = scored_df.to_csv(index=False).encode("utf-8-sig")
+                        st.session_state[f"n4_scored_csv_{group['name']}"] = csv_bytes
+
+                        xlsx_buf = io.BytesIO()
+                        with pd.ExcelWriter(xlsx_buf, engine="xlsxwriter") as w_x:
+                            scored_df.to_excel(w_x, sheet_name="ScoredData", index=False)
+                        xlsx_buf.seek(0)
+                        st.session_state[f"n4_scored_xlsx_{group['name']}"] = xlsx_buf.getvalue()
+
+                        if n_missing_rows > 0:
+                            st.warning(f"检测到 {n_missing_rows} 行样本存在缺失值，已记为 -999。")
+                        st.success(f"最终得分计算完成：{len(scored_df)} 行样本。")
+                    except Exception as e:
+                        st.error(f"计算最终得分失败: {e}")
+                        import traceback
+                        st.code(traceback.format_exc())
+
+                if st.session_state.get(f"n4_scored_df_{group['name']}") is not None:
+                    st.markdown("###### 数据预览（含因子得分与最终得分，前20行）")
+                    preview_scored = st.session_state[f"n4_scored_df_{group['name']}"].head(20).copy()
+                    score_cols = [c for c in preview_scored.columns if str(c).startswith("relative_final_score")]
+                    for c in score_cols:
+                        preview_scored[c] = pd.to_numeric(preview_scored[c], errors="coerce").round(3)
+                    if "absolute_final_score" in preview_scored.columns:
+                        preview_scored["absolute_final_score"] = pd.to_numeric(
+                            preview_scored["absolute_final_score"], errors="coerce"
+                        ).round(3)
+                    st.dataframe(preview_scored, use_container_width=True)
+
+                    dl_c1, dl_c2 = st.columns(2)
+                    mgid_dl = _safe_filename_part(measuregroup_title, "measuregroup")
+                    today = date.today().strftime("%Y-%m-%d")
+                    user = st.session_state.get("user_name", "unknown_user")
+                    safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user)).strip() or "unknown_user"
+                    cfa_type = "prelim_multi_cfa" if st.session_state.get("n4_prelim") else "multi_cfa"
+                    scored_base = f"{mgid_dl}_{cfa_type}_scored_{today}_{safe_user}"
+                    with dl_c1:
+                        if st.session_state.get(f"n4_scored_csv_{group['name']}"):
+                            st.download_button(
+                                "⬇️ 下载得分数据（CSV）",
+                                data=st.session_state[f"n4_scored_csv_{group['name']}"],
+                                file_name=f"{scored_base}.csv",
+                                mime="text/csv",
+                                key=f"n4_dl_scored_csv_{group['name']}"
+                            )
+                    with dl_c2:
+                        if st.session_state.get(f"n4_scored_xlsx_{group['name']}"):
+                            st.download_button(
+                                "⬇️ 下载得分数据（Excel）",
+                                data=st.session_state[f"n4_scored_xlsx_{group['name']}"],
+                                file_name=f"{scored_base}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"n4_dl_scored_xlsx_{group['name']}"
+                            )
+
+                # ==========================================================
+                # 📤 导出最终得分公式参数表
+                # ==========================================================
+                st.markdown("---")
+                st.markdown("##### 📤 导出最终得分公式参数表")
+                st.caption("FinalScore = intercept + Σ(beta * item)。")
+
+                measure_ids_for_hint = final['dataset_names']
+                if measure_ids_for_hint:
+                    st.info("本次将使用的 measure_id： " + " | ".join(measure_ids_for_hint))
+
+                if st.button(f"📤 生成公式参数表", key=f"n4_gen_formula_{group['name']}"):
+                    try:
+                        formula_scale_min = int(n4_scale_min)
+                        formula_scale_max = int(n4_scale_max)
+                        if formula_scale_min >= formula_scale_max:
+                            st.error("scale_min 必须小于 scale_max。")
+                            st.stop()
+
+                        cfa_df_formula = final['df_used']
+                        dataset_names_formula = final['dataset_names']
+                        est_formula = final['estimates']
+                        formula_measuregroup_title = str(measuregroup_title).strip() or "measuregroup"
+                        formula_measure_ids = list(dataset_names_formula)
+
+                        if cfa_df_formula is None or not dataset_names_formula or est_formula is None:
+                            st.error("请先完成 Multi-factor 模型拟合后再导出公式参数。")
+                            st.stop()
+
+                        formula_measure_df, formula_items_df = _build_multifactor_formula_table(
+                            cfa_df_formula,
+                            dataset_names_formula,
+                            est_formula,
+                            formula_measuregroup_title,
+                            formula_measure_ids,
+                            formula_scale_min,
+                            formula_scale_max,
+                        )
+
+                        st.session_state[f"n4_formula_measure_df_{group['name']}"] = formula_measure_df
+                        st.session_state[f"n4_formula_items_df_{group['name']}"] = formula_items_df
+
+                        export_flat = formula_items_df.copy()
+                        for col, val in formula_measure_df.iloc[0].items():
+                            if col not in export_flat.columns:
+                                export_flat[col] = val
+                        cols_order = ["measure_id", "measuregroup_title", "dataset", "CFA_model", "intercept_rel", "intercept_abs",
+                                      "reporting_mean", "reporting_sd", "scale_min", "scale_max", "创建时间",
+                                      "item_col", "item_text", "item_num", "reverse", "beta_rel", "beta_abs", "sort_order"]
+                        export_flat = export_flat[[c for c in cols_order if c in export_flat.columns]]
+
+                        st.session_state[f"n4_formula_csv_{group['name']}"] = export_flat.to_csv(index=False).encode("utf-8-sig")
+                        fbuf = io.BytesIO()
+                        with pd.ExcelWriter(fbuf, engine="xlsxwriter") as w_f:
+                            export_flat.to_excel(w_f, sheet_name="formula", index=False)
+                        fbuf.seek(0)
+                        st.session_state[f"n4_formula_xlsx_{group['name']}"] = fbuf.getvalue()
+                        st.success("✅ 公式参数表已生成！")
+                    except Exception as e:
+                        st.error(f"生成公式参数表失败: {e}")
+
+                if st.session_state.get(f"n4_formula_items_df_{group['name']}") is not None:
+                    st.markdown("###### 公式参数表预览（前20行）")
+                    m_df = st.session_state.get(f"n4_formula_measure_df_{group['name']}")
+                    i_df = st.session_state.get(f"n4_formula_items_df_{group['name']}")
+                    if m_df is not None and i_df is not None:
+                        preview_flat = i_df.copy()
+                        for col, val in m_df.iloc[0].items():
+                            if col not in preview_flat.columns:
+                                preview_flat[col] = val
+                        st.dataframe(preview_flat.head(20), use_container_width=True)
+
+                    dl_f1, dl_f2 = st.columns(2)
+                    mgid_f = _safe_filename_part(str(measuregroup_title).strip() or "measuregroup", "measuregroup")
+                    today_f = date.today().strftime("%Y-%m-%d")
+                    user_f = st.session_state.get("user_name", "unknown_user")
+                    safe_user_f = re.sub(r'[\\/:*?"<>|]+', '_', str(user_f)).strip() or "unknown_user"
+                    cfa_type_f = "prelim_multi_cfa" if st.session_state.get("n4_prelim") else "multi_cfa"
+                    formula_base = f"{mgid_f}_{cfa_type_f}_final_score_formula_{today_f}_{safe_user_f}"
+                    with dl_f1:
+                        if st.session_state.get(f"n4_formula_csv_{group['name']}"):
+                            st.download_button(
+                                "⬇️ 下载公式参数（CSV）",
+                                data=st.session_state[f"n4_formula_csv_{group['name']}"],
+                                file_name=f"{formula_base}.csv",
+                                mime="text/csv",
+                                key=f"n4_dl_formula_csv_{group['name']}"
+                            )
+                    with dl_f2:
+                        if st.session_state.get(f"n4_formula_xlsx_{group['name']}"):
+                            st.download_button(
+                                "⬇️ 下载公式参数（Excel）",
+                                data=st.session_state[f"n4_formula_xlsx_{group['name']}"],
+                                file_name=f"{formula_base}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"n4_dl_formula_xlsx_{group['name']}"
+                            )
+
+    # ==========================================================
+    # 6. 全局确认清单（底部看板）
+    # ==========================================================
+    st.markdown("---")
+    st.subheader("📋 Multi-Factor CFA 确认清单")
+    st.caption("以下仅展示已点击「✅ 确认采用」的 Measure Group。")
+
+    confirmed_groups = st.session_state.get("n4_multi_confirmed", {})
+    if not confirmed_groups:
+        st.info("💡 当前暂无已确认的 Measure Group。请在上方各标签页中查看结果、选择标准并点击确认。")
+    else:
+        summary_rows = []
+        for g_name, payload in confirmed_groups.items():
+            final = payload['final']
+            row = {
+                "Measure Group": g_name,
+                "采用标准": payload.get('stage_label', '-'),
+                "总题数": final['n_items'],
+                "CFI": f"{final['cfi']:.3f}" if not np.isnan(final['cfi']) else "N/A",
+                "TLI": f"{final['tli']:.3f}" if not np.isnan(final['tli']) else "N/A",
+                "RMSEA": f"{final['rmsea']:.3f}" if not np.isnan(final['rmsea']) else "N/A",
+                "SRMR": f"{final['srmr']:.3f}" if not np.isnan(final['srmr']) else "N/A",
+            }
+            for m, n in final['per_measure_n'].items():
+                row[f"{m} 题数"] = n
+            summary_rows.append(row)
+        summary_df = pd.DataFrame(summary_rows)
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
 
 
