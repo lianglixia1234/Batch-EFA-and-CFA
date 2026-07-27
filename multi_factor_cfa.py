@@ -3001,10 +3001,7 @@ def render_multi_cfa():
 # ==============================================================================
 
 def _build_merged_df_for_group(measure_names: List[str], available_measures: Dict[str, Dict]) -> Optional[pd.DataFrame]:
-    """
-    将多个 measure 的数据按列合并，列名加前缀 measure_name__。
-    假设各 measure 样本行数相同、顺序一致（来自同一批数据）。
-    """
+    """将多个 measure 的数据按列合并，列名加前缀 measure_name__。假设各 measure 样本行数相同、顺序一致（来自同一批数据）。"""
     base_df = None
     n_rows = None
     for m_name in measure_names:
