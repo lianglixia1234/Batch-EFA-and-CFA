@@ -3670,7 +3670,7 @@ def render_batch_multi_cfa():
                     "TLI": f"{s2_final['tli']:.3f}" if not np.isnan(s2_final['tli']) else "N/A",
                     "RMSEA": f"{s2_final['rmsea']:.3f}" if not np.isnan(s2_final['rmsea']) else "N/A",
                     "SRMR": f"{s2_final['srmr']:.3f}" if not np.isnan((s2_final['srmr']) else "N/A"
-                )
+                })
 
 
 
