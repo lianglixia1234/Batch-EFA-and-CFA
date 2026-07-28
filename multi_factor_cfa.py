@@ -3483,13 +3483,13 @@ def render_batch_multi_cfa():
     run_col, prelim_col = st.columns([1, 1])
     with run_col:
         run_clicked = st.button("🚀 一键批量运行自动删题 Multi-Factor CFA", type="primary", key="n4_run_multi_cfa")
-    with prelim_col:
-        if "n4_prelim" not in st.session_state:
-            st.session_state.n4_prelim = False
-        prelim_checked = st.checkbox(
-            "当前为 preliminary CFA", value=st.session_state.n4_prelim, key="n4_prelim_checkbox"
-        )
-        st.session_state.n4_prelim = prelim_checked
+    # with prelim_col:
+      #  if "n4_prelim" not in st.session_state:
+       #     st.session_state.n4_prelim = False
+        #prelim_checked = st.checkbox(
+         #   "当前为 preliminary CFA", value=st.session_state.n4_prelim, key="n4_prelim_checkbox"
+        #)
+        #st.session_state.n4_prelim = prelim_checked
 
     if run_clicked:
         for group in st.session_state.n4_multi_groups:
