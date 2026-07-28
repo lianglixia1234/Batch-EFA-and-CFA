@@ -428,7 +428,7 @@ def render_single_cfa():
     with cfa_prelim_col:
         if "n2_prelim_single_cfa" not in st.session_state:
             st.session_state.n2_prelim_single_cfa = False
-        prelim_checked = st.checkbox("当前为 preliminary CFA", value=st.session_state.n2_prelim_single_cfa, key="n2_prelim_checkbox")
+        # prelim_checked = st.checkbox("当前为 preliminary CFA", value=st.session_state.n2_prelim_single_cfa, key="n2_prelim_checkbox")
         st.session_state.n2_prelim_single_cfa = prelim_checked
     if run_clicked:
         if not factor_items:
