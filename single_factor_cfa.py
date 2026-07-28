@@ -2337,13 +2337,13 @@ def render_batch_cfa():
     run_col, prelim_col = st.columns([1, 1])
     with run_col:
         run_clicked = st.button("🚀 一键确认配置并批量运行自动删题CFA", type="primary", key="batch_run_cfa")
-    with prelim_col:
-        if "batch_prelim" not in st.session_state:
-            st.session_state.batch_prelim = False
-        prelim_checked = st.checkbox(
-            "当前为 preliminary CFA", value=st.session_state.batch_prelim, key="batch_prelim_checkbox"
-        )
-        st.session_state.batch_prelim = prelim_checked
+    #with prelim_col:
+     #   if "batch_prelim" not in st.session_state:
+      #      st.session_state.batch_prelim = False
+       # prelim_checked = st.checkbox(
+        #    "当前为 preliminary CFA", value=st.session_state.batch_prelim, key="batch_prelim_checkbox"
+        #)
+        #st.session_state.batch_prelim = prelim_checked
 
     if run_clicked:
         invalid_measures = []
