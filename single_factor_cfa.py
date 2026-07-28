@@ -425,11 +425,11 @@ def render_single_cfa():
     cfa_btn_col, cfa_prelim_col = st.columns([1, 1])
     with cfa_btn_col:
         run_clicked = st.button("🚀 开始运行 CFA 分析", type="primary")
-    with cfa_prelim_col:
-        if "n2_prelim_single_cfa" not in st.session_state:
-            st.session_state.n2_prelim_single_cfa = False
+    # with cfa_prelim_col:
+    #     if "n2_prelim_single_cfa" not in st.session_state:
+    #         st.session_state.n2_prelim_single_cfa = False
         # prelim_checked = st.checkbox("当前为 preliminary CFA", value=st.session_state.n2_prelim_single_cfa, key="n2_prelim_checkbox")
-        st.session_state.n2_prelim_single_cfa = prelim_checked
+    #    st.session_state.n2_prelim_single_cfa = prelim_checked
     if run_clicked:
         if not factor_items:
             st.error("❌ 错误：请至少为主因子选择 1 个题目。")
