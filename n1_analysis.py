@@ -2450,7 +2450,6 @@ def render_stage3_efa_no_deletion():
 
 def render_stage4_package_download():
     st.markdown("---")
-    st.subheader("📦 第四阶段：文件打包下载确认")
     st.caption("请勾选各量表需要打包下载的报告文件，系统将生成批量 ZIP 压缩包。")
 
     archive = st.session_state.get("report_archive", {})
