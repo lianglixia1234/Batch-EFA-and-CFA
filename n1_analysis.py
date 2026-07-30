@@ -1404,7 +1404,7 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             if var_mask.any():
                 trait_var = _to_num(est.loc[var_mask, 'Estimate'].iloc[0])
 
-        # ============================================================
+    
         # 2. 提取载荷
         #    你的 semopy 用 op='~'，LHS=题目，RHS=因子名
         # ============================================================
@@ -1422,6 +1422,21 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             loadings_unstd[item_name] = _to_num(row.get('Estimate', np.nan))
             std_val = row.get('Std.all', row.get('Std. All', row.get('Est. Std', row.get('est.std', np.nan))))
             loadings_std[item_name] = _to_num(std_val)
+
+        # 【新增④】提取方法因子载荷
+        loadings_unstd_method = {}
+        loadings_std_method = {}
+        if mname:
+            method_load_mask = (est['op'] == '~') & (est['RHS'] == mname)
+            if not method_load_mask.any():
+                method_load_mask = (est['op'] == '~') & (est['RHS'].str.lower() == mname.lower())
+            
+            method_load_rows = est[method_load_mask]
+            for _, row in method_load_rows.iterrows():
+                item_name = str(row['LHS'])
+                loadings_unstd_method[item_name] = _to_num(row.get('Estimate', np.nan))
+                std_val = row.get('Std.all', row.get('Std. All', row.get('Est. Std', row.get('est.std', np.nan))))
+                loadings_std_method[item_name] = _to_num(std_val)
 
         # ============================================================
         # 3. 前缀数字匹配函数（核心修复）
