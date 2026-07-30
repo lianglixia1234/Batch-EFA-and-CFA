@@ -132,11 +132,14 @@ def run_cfa_gui(df, factor_name, factor_items, method_name, method_items):
     else:
         model_desc = f"{factor_name} =~ 1*{marker_item}\n"
     
+    # 在 run_cfa_gui 函数内，约第 80-90 行附近
     if method_items:
         ordered_method_items = sort_item_cols_by_number(list(method_items))
         model_desc += f"{method_name} =~ {' + '.join(ordered_method_items)}\n"
         # 方法因子方差固定为 1
         model_desc += f"{method_name} ~~ 1*{method_name}\n"
+        # ✅ 新增：目标潜变量因子与方法因子之间的协方差固定为 0
+        model_desc += f"{factor_name} ~~ 0*{method_name}\n"
     
     # 2. 初始化与拟合
     import semopy
@@ -752,6 +755,17 @@ def render_single_cfa():
                                     loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in est.columns else np.nan
                                     loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in est.columns else np.nan
 
+                        # 提取方法因子载荷（新增）
+                        loadings_unstd_method = {}
+                        loadings_std_method = {}
+                        mname = method_name  # 方法因子名
+                        if {"LHS", "op", "RHS"}.issubset(est.columns):
+                            method_load_rows = est[(est["op"] == "=~") & (est["LHS"] == mname)]
+                            if not method_load_rows.empty:
+                                for _, r in method_load_rows.iterrows():
+                                    loadings_unstd_method[str(r["RHS"])] = _to_num(r.get("Estimate", np.nan))
+                                    loadings_std_method[str(r["RHS"])] = _to_num(r.get("Std.all", np.nan))
+                                    
                         chi2_val = _get_any(stats_dict, ["chi2", "Chi2"])
                         dof_val = _get_any(stats_dict, ["DoF", "dof", "df"])
                         p_val = _get_any(stats_dict, ["chi2 p-value", "p-value", "pvalue", "p_value"])
@@ -837,6 +851,9 @@ def render_single_cfa():
                                 "variance_latent": trait_var,
                                 "unstandardised_loading": loadings_unstd.get(item_clean, np.nan),
                                 "standardised_loading": loadings_std.get(item_clean, np.nan),
+                                # ✅ 新增两个字段（仅反向题有值，非反向题为 np.nan）
+                                "unstandardised_loading_method": loadings_unstd_method.get(item_clean, np.nan) if rev == 1 else np.nan,
+                                "standardised_loading_method": loadings_std_method.get(item_clean, np.nan) if rev == 1 else np.nan,
                                 "chi2_user_model": chi2_val,
                                 "df_user_model": dof_val,
                                 "p_value_user_model": p_val,
@@ -2451,32 +2468,59 @@ def render_batch_cfa():
             s2_final = s2['final'] if s2 else None
 
             # ---- 5.1 两个标准的对比表格 ----
-            st.markdown("##### 📋 两个标准结果对比")
+            st.markdown("##### 📋 两个标准结果对比（逐题删题记录）")
             
-            compare_data = []
-            if s1_final:
-                compare_data.append({
-                    "标准": "标准1（保质量）",
-                    "题目数": s1_final['n_items'],
-                    "CFI": f"{s1_final['cfi']:.3f}" if not np.isnan(s1_final['cfi']) else "N/A",
-                    "TLI": f"{s1_final['tli']:.3f}" if not np.isnan(s1_final['tli']) else "N/A",
-                    "RMSEA": f"{s1_final['rmsea']:.3f}" if not np.isnan(s1_final['rmsea']) else "N/A",
-                    "SRMR": f"{s1_final['srmr']:.3f}" if not np.isnan(s1_final['srmr']) else "N/A",
-                    "题目列表": ", ".join(s1_final['items'][:10]) + ("..." if len(s1_final['items']) > 10 else ""),
-                })
-            if s2_final:
-                compare_data.append({
-                    "标准": "标准2（求精简）",
-                    "题目数": s2_final['n_items'],
-                    "CFI": f"{s2_final['cfi']:.3f}" if not np.isnan(s2_final['cfi']) else "N/A",
-                    "TLI": f"{s2_final['tli']:.3f}" if not np.isnan(s2_final['tli']) else "N/A",
-                    "RMSEA": f"{s2_final['rmsea']:.3f}" if not np.isnan(s2_final['rmsea']) else "N/A",
-                    "SRMR": f"{s2_final['srmr']:.3f}" if not np.isnan(s2_final['srmr']) else "N/A",
-                    "题目列表": ", ".join(s2_final['items'][:10]) + ("..." if len(s2_final['items']) > 10 else ""),
+            # 获取初始题目列表（Stage 1 开始时的全部题目，即原始题目池）
+            initial_items = []
+            if s1 and s1.get('history') and len(s1['history']) > 0:
+                initial_items = s1['history'][0]['items']
+            
+            # 兜底：如果取不到初始题目，用两个标准最终保留题目的并集
+            if not initial_items:
+                all_items = set()
+                if s1_final:
+                    all_items.update(s1_final['items'])
+                if s2_final:
+                    all_items.update(s2_final['items'])
+                initial_items = sort_item_cols_by_number(list(all_items))
+            
+            compare_rows = []
+            for item in initial_items:
+                in_s1 = item in s1_final['items'] if s1_final else False
+                in_s2 = item in s2_final['items'] if s2_final else False
+                
+                # 差异状态判断
+                if in_s1 and in_s2:
+                    status = "✅ 两标准均保留"
+                elif in_s1 and not in_s2:
+                    status = "❌ Stage2 删除（仅标准1保留）"
+                elif not in_s1 and in_s2:
+                    status = "⚠️ 仅标准2保留（异常）"
+                else:
+                    status = "❌ 两标准均删除"
+                
+                rev = "r" if _is_reverse_coded(item) else ""
+                
+                compare_rows.append({
+                    "题目": item,
+                    "反向题": rev,
+                    "标准1（保质量）": "保留" if in_s1 else "删除",
+                    "标准2（求精简）": "保留" if in_s2 else "删除",
+                    "差异说明": status,
                 })
             
-            compare_df = pd.DataFrame(compare_data)
+            compare_df = pd.DataFrame(compare_rows)
             st.dataframe(compare_df, use_container_width=True, hide_index=True)
+            
+            # 汇总指标单独展示
+            st.markdown("###### 汇总指标")
+            sum_cols = st.columns(4)
+            if s1_final:
+                sum_cols[0].metric("标准1 CFI", f"{s1_final['cfi']:.3f}" if not np.isnan(s1_final['cfi']) else "N/A")
+                sum_cols[1].metric("标准1 TLI", f"{s1_final['tli']:.3f}" if not np.isnan(s1_final['tli']) else "N/A")
+            if s2_final:
+                sum_cols[2].metric("标准2 CFI", f"{s2_final['cfi']:.3f}" if not np.isnan(s2_final['cfi']) else "N/A")
+                sum_cols[3].metric("标准2 TLI", f"{s2_final['tli']:.3f}" if not np.isnan(s2_final['tli']) else "N/A")
 
             # ---- 5.2 Stage 1 / Stage 2 详细结果 ----
             detail_tabs = st.tabs(["标准1（保质量）详情", "标准2（求精简）详情"])
@@ -2658,6 +2702,18 @@ def render_batch_cfa():
                                     loadings_unstd[str(r["RHS"])] = _to_num(r.get("Estimate", np.nan))
                                     loadings_std[str(r["RHS"])] = _to_num(r.get("Std.all", np.nan))
                         
+                        # 提取方法因子载荷（新增）
+                        loadings_unstd_method = {}
+                        loadings_std_method = {}
+                        mname = "Method"
+                        if {"LHS", "op", "RHS"}.issubset(estimates.columns):
+                            method_load_rows = estimates[(estimates["op"] == "=~") & (estimates["LHS"] == mname)]
+                            if not method_load_rows.empty:
+                                for _, r in method_load_rows.iterrows():
+                                    loadings_unstd_method[str(r["RHS"])] = _to_num(r.get("Estimate", np.nan))
+                                    loadings_std_method[str(r["RHS"])] = _to_num(r.get("Std.all", np.nan))
+                        
+                        
                         # 提取潜变量方差
                         trait_var = np.nan
                         vv = estimates[(estimates["op"] == "~~") & (estimates["LHS"] == fname) & (estimates["RHS"] == fname)]
@@ -2722,6 +2778,9 @@ def render_batch_cfa():
                                 "variance_latent": trait_var,
                                 "unstandardised_loading": loadings_unstd.get(item, np.nan),
                                 "standardised_loading": loadings_std.get(item, np.nan),
+                                # ✅ 新增两个字段（仅反向题有值，非反向题为 np.nan）
+                                "unstandardised_loading_method": loadings_unstd_method.get(item_clean, np.nan) if rev == 1 else np.nan,
+                                "standardised_loading_method": loadings_std_method.get(item_clean, np.nan) if rev == 1 else np.nan,
                                 "chi2_user_model": _extract_fit_val(stats_dict, "chi2"),
                                 "df_user_model": _extract_fit_val(stats_dict, "DoF"),
                                 "p_value_user_model": _extract_fit_val(stats_dict, "chi2 p-value"),
@@ -3259,10 +3318,29 @@ def render_batch_cfa():
         summary_df = pd.DataFrame(summary_rows)
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
+        # 替换原来的 expander 内容
         with st.expander("🔍 查看各量表保留的题目详情", expanded=False):
             for row in summary_rows:
                 st.markdown(f"**{row['Measure']}**（{row['采用标准']}，{row['保留题目数']} 题）")
-                st.caption(row['保留题目'])
+                
+                # ✅ 改为一个题目一行展示
+                final_items = confirmed_measures.get(row['Measure'], {}).get('final', {}).get('items', [])
+                item_detail_rows = []
+                for idx_i, item in enumerate(final_items, start=1):
+                    _, num, text = parse_item_col(item)
+                    rev = "是" if _is_reverse_coded(item) else "否"
+                    item_detail_rows.append({
+                        "序号": idx_i,
+                        "题号": num if num is not None else "-",
+                        "列名": item,
+                        "题目文本": text or "-",
+                        "反向题": rev,
+                    })
+                if item_detail_rows:
+                    st.dataframe(pd.DataFrame(item_detail_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.caption("无保留题目")
+                st.markdown("---")
 
 
 
