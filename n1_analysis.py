@@ -2426,7 +2426,7 @@ def render_stage3_efa_no_deletion():
                             "display_name": final_measure_id,
                             "stage3": {
                                 "bytes": single_buf.getvalue(),
-                                "filename": f"{safe_measure_id}_EFA_report_{today_str}.xlsx",
+                                "filename": f"{safe_measure_id}_efa_report_{today_str}.xlsx",
                             }
                         })
                         
