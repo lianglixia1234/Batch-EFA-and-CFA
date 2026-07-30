@@ -566,13 +566,16 @@ def render_stage1_efa_clean():
         and st.session_state.get("dc_measures")
     )
 
-    source_options = ["📤 上传新文件 (Excel/CSV)"]
-    if has_cached_data:
-        source_options.append("💾 来自 Data Cleaning（子数据集）")
+    # 【修改】优先放入数据清洗选项，让默认选中来自数据清洗
+    source_options = []
     if has_dual_data:
         source_options.append("💾 来自 Data Cleaning（四数据集）")
+    if has_cached_data:
+        source_options.append("💾 来自 Data Cleaning（子数据集）")
+    # 上传文件始终放最后
+    source_options.append("📤 上传新文件 (Excel/CSV)")
 
-    data_source = st.radio("请选择数据来源:", source_options, horizontal=True)
+    data_source = st.radio("请选择数据来源:", source_options, horizontal=True, index=0)
 
     # 用字典统一存储待分析的 { "Measure名称": pd.DataFrame(包含其所属题项) }
     measures_to_process = {}
@@ -591,7 +594,7 @@ def render_stage1_efa_clean():
             selected_measures = st.multiselect(
                 "2. 选择要批量运行的 Measure（可多选）",
                 measure_names,
-                default=measure_names,  # 默认全选，体现批量效率
+                default=measure_names,
                 key="n1_dual_measures",
             )
             
@@ -612,60 +615,40 @@ def render_stage1_efa_clean():
         if not dataset_names:
             st.warning("暂无已保存的子数据集，请先前往数据清洗页面保存。")
         else:
-            # ==============================================================
-            # 🚨 【核心改造】将 st.selectbox 升级为 st.multiselect，支持多选子数据集！
-            # ==============================================================
             selected_names = st.multiselect(
                 "1. 请选择要批量运行的已保存子数据集（可多选）:", 
                 options=dataset_names,
-                default=dataset_names, # 默认全选，极大地提高效率
+                default=dataset_names,
                 key="n1_batch_sub_datasets"
             )
             
             if selected_names:
-                # 建立一个临时存储，用来汇总所有选中的数据集里捞出来的 Measure
                 saved_measures_found = {}
-                
-                # 第一层循环：遍历用户选中的每一个子数据集
                 for current_dataset_name in selected_names:
                     df_sub = st.session_state.sub_datasets[current_dataset_name]
-                    
-                    # 策略 1：全量扫描内存中所有匹配的 Measure 题目映射关系
                     for key in list(st.session_state.keys()):
                         if key.startswith("dc_measure_cols_"):
                             parts = key.split("_")
                             if len(parts) >= 4:
                                 m_name = "_".join(parts[3:-1]) 
                                 items_in_measure = st.session_state[key]
-                                
                                 if items_in_measure and isinstance(items_in_measure, list):
-                                    # 验证这些题在当前这个子数据集中是否存在
                                     valid_cols = [c for c in items_in_measure if c in df_sub.columns]
                                     if len(valid_cols) >= 3:
-                                        # 为了防止多个数据集里有同名 Measure 导致覆盖，
-                                        # 组合成一个新的 Key 名字，例如: "数据集A - 心理资本"
                                         unique_task_name = f"{current_dataset_name} - {m_name}"
                                         saved_measures_found[unique_task_name] = df_sub[valid_cols].copy()
 
-                # ==============================================================
-                # 🚀 渲染第二步的多选确认框：展示所有被完美切片出来的任务队列
-                # ==============================================================
                 if saved_measures_found:
                     st.success(f"🎯 成功从选中的 **{len(selected_names)}** 个数据集中，精准识别到 **{len(saved_measures_found)}** 个分析维度！")
-                    
                     selected_sub_measures = st.multiselect(
                         "2. 确认要批量运行的【数据集-Measure】组合（默认已全选）：",
                         options=list(saved_measures_found.keys()),
-                        default=list(saved_measures_found.keys()), # 默认全选，一键多跑！
+                        default=list(saved_measures_found.keys()),
                         key="sub_batch_final_task_select"
                     )
-                    
-                    # 将最终确认的组合塞入底部的核心计算管道
                     for task_key in selected_sub_measures:
                         measures_to_process[task_key] = saved_measures_found[task_key]
-                        
                 else:
-                    # 兜底：如果没有划分 Measure，直接把每个选中的数据集整张表作为一个大任务
                     st.info("💡 将每个子数据集作为独立问卷加入")
                     for current_dataset_name in selected_names:
                         df_sub = st.session_state.sub_datasets[current_dataset_name]
@@ -678,7 +661,7 @@ def render_stage1_efa_clean():
                 if uploaded_file.name.endswith(('.xlsx', '.xls')):
                     df_upload = pd.read_excel(uploaded_file)
                 else:
-                    df_upload = pd.read_csv(uploaded_csv)
+                    df_upload = pd.read_csv(uploaded_file)
                 st.write("文件预览 (前5行):")
                 st.dataframe(df_upload.head())
                 
