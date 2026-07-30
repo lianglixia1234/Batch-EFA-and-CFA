@@ -4015,7 +4015,7 @@ def render_batch_multi_cfa():
 
 def render_multifactor_cfa():
     # 模式选择：单模型 or 批量
-    mode = st.radio("运行模式", ["单measure group CFA", "批量自动删题 multi CFA"], horizontal=True)
+    mode = st.radio("运行模式", ["批量自动删题 multi CFA","单measure group CFA"], horizontal=True)
     
     if mode == "批量自动删题 multi CFA":
         render_batch_multi_cfa()
