@@ -1569,9 +1569,13 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
             rev = 1 if _is_reverse_coded(item) else 0
             item_number = num if num is not None else _extract_item_number(item, idx)
             
-            # 用前缀数字匹配取载荷
+            # 主因子载荷（前缀数字匹配）
             unstd = _match_loading_by_prefix(item, loadings_unstd)
             std = _match_loading_by_prefix(item, loadings_std)
+            
+            # 【新增④】方法因子载荷：仅反向题有值，非反向题留空(np.nan)
+            unstd_method = _match_loading_by_prefix(item, loadings_unstd_method) if rev == 1 else np.nan
+            std_method = _match_loading_by_prefix(item, loadings_std_method) if rev == 1 else np.nan
             
             rows.append({
                 "measure_id": mid,
@@ -1581,6 +1585,8 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
                 "variance_latent": trait_var,
                 "unstandardised_loading": unstd,
                 "standardised_loading": std,
+                "standardised_loading_method": std_method,       # 【新增④】
+                "unstandardised_loading_method": unstd_method,   # 【新增④】
                 "chi2_user_model": chi2_val,
                 "df_user_model": dof_val,
                 "p_value_user_model": p_val,
@@ -1621,9 +1627,24 @@ def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_item
 
         today = date.today().strftime("%Y-%m-%d")
         safe_mid = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", str(mid)).strip(" .") or "measure"
-        user_name = st.session_state.get("user_name", "unknown_user")
-        safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
         filename = f"{safe_mid}_precfa_report_{today}.xlsx"
+
+        # ============================================================
+        # 【新增】归档到报告池，供第四阶段打包下载
+        # ============================================================
+        if "report_archive" not in st.session_state:
+            st.session_state.report_archive = {}
+        pool_key = sub_name
+        if pool_key not in st.session_state.report_archive:
+            st.session_state.report_archive[pool_key] = {}
+        st.session_state.report_archive[pool_key].update({
+            "display_name": mid,
+            "stage2": {
+                "bytes": buf.getvalue(),
+                "filename": filename,
+            },
+            "had_deletion": st.session_state.get(f"n2_{sub_name}_had_deletion", False),
+        })
 
         st.session_state.n2_report_sheet_items_preview = sheet_items.copy()
         st.session_state.n2_report_cov_preview = cov_matrix.copy() if not cov_matrix.empty else None
