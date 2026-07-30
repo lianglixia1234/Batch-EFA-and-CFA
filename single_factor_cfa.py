@@ -3281,7 +3281,7 @@ def render_batch_cfa():
 #————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————————-——
 def render_singlefactor_cfa():
     # 模式选择：单模型 or 批量
-    mode = st.radio("运行模式", ["单measure CFA", "批量自动删题 CFA"], horizontal=True)
+    mode = st.radio("运行模式", ["批量自动删题 CFA","单measure CFA"], horizontal=True)
     
     if mode == "批量自动删题 CFA":
         render_batch_cfa()
