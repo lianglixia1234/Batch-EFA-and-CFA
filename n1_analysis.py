@@ -1375,7 +1375,7 @@ def _extract_fit(fit_stats, key):
 
 
 # 📂📂📂📂📂
-def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_items, final_estimates, final_fit, fname, measure_id):
+def _generate_and_download_report(sub_name, cfg, final_df_cfa, final_factor_items, final_estimates, final_fit, fname, mname, measure_id):
     """生成Excel报告并触发下载"""
     try:
         fname = str(fname).strip()
@@ -2046,7 +2046,7 @@ def render_stage2_cfa_clean():
 
                         # ---- 下载报告 ----
                 
-                        _generate_and_download_report(
+                       _generate_and_download_report(
                             sub_name=sub_name,
                             cfg=cfg,
                             final_df_cfa=final_df_cfa,
@@ -2054,6 +2054,7 @@ def render_stage2_cfa_clean():
                             final_estimates=final_estimates,
                             final_fit=final_fit,
                             fname=fname,
+                            mname=mname,
                             measure_id=st.session_state[f"n2_{sub_name}_measure_id"],
                         )
 
