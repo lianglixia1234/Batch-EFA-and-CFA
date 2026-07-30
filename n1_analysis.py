@@ -1016,6 +1016,21 @@ def render_stage1_efa_clean():
                         today_str = date.today().strftime("%Y-%m-%d")
                         safe_measure_id = "".join(c for c in final_measure_id if c not in '[]:*?/\\ ')
                         file_filename = f"{safe_measure_id}_preEFA_report_{today_str}.xlsx"  # 文件名享受个性化长改名
+
+
+                        # 【新增】归档到报告池，供第四阶段打包下载
+                        if "report_archive" not in st.session_state:
+                            st.session_state.report_archive = {}
+                        archive_key = real_measure_id
+                        if archive_key not in st.session_state.report_archive:
+                            st.session_state.report_archive[archive_key] = {}
+                        st.session_state.report_archive[archive_key].update({
+                            "display_name": final_measure_id,
+                            "stage1": {
+                                "bytes": single_buf.getvalue(),
+                                "filename": file_filename,
+                            }
+                        })
                         
                         st.download_button(
                             label=f"⬇️ 立即下载 【{final_measure_id}】 维度的独立 Excel 报告",
@@ -2161,13 +2176,32 @@ def render_stage3_efa_no_deletion():
         key="stage3_multiselect_cfa_keys"
     )
 
+
+
+    # ==========================================================================
+    # 【新增】仅保留 CFA 阶段有删题的 Measure，无删题则跳过最终不删题 EFA
+    # ==========================================================================
+    archive = st.session_state.get("report_archive", {})
+    final_analysis_queue = {}
+    skipped_measures = []
+    for k in selected_cfa_keys:
+        payload = archive.get(k, {})
+        if payload.get("had_deletion", False):
+            final_analysis_queue[k] = all_cfa_measures[k]["df_ready"]
+        else:
+            skipped_measures.append(k)
+    
+    if skipped_measures:
+        st.info(f"💡 以下量表在 CFA 阶段未进行删题，已自动跳过最终不删题 EFA：{', '.join(skipped_measures)}")
+    
+    if not final_analysis_queue:
+        st.warning("⚠️ 所选量表在 CFA 阶段均未删题，无需执行最终不删题 EFA。")
+        return
     
     if not selected_cfa_keys:
         st.warning("⚠️ 请至少勾选一个量表以继续分析。")
         return
 
-    # 组装最终待分析队列
-    final_analysis_queue = {k: all_cfa_measures[k]["df_ready"] for k in selected_cfa_keys}
 
     # ==========================================================================
     # 3. 全局统一参数配置面板
@@ -2365,10 +2399,6 @@ def render_stage3_efa_no_deletion():
                 
                         rows.append(row)
 
-                       
-
-
-
                     
                     single_measure_df = pd.DataFrame(rows)
                     st.dataframe(single_measure_df, use_container_width=True)
@@ -2400,6 +2430,20 @@ def render_stage3_efa_no_deletion():
                         
                         today_str = date.today().strftime("%Y-%m-%d")
                         safe_measure_id = "".join(c for c in final_measure_id if c not in '[]:*?/\\ ')
+
+                        # 【新增】归档到报告池，供第四阶段打包下载
+                        if "report_archive" not in st.session_state:
+                            st.session_state.report_archive = {}
+                        pool_key = cfa_key
+                        if pool_key not in st.session_state.report_archive:
+                            st.session_state.report_archive[pool_key] = {}
+                        st.session_state.report_archive[pool_key].update({
+                            "display_name": final_measure_id,
+                            "stage3": {
+                                "bytes": single_buf.getvalue(),
+                                "filename": f"{safe_measure_id}_EFA_report_{today_str}.xlsx",
+                            }
+                        })
                         
                         st.download_button(
                             label=f"⬇️ 下载 【{final_measure_id}】 维度的 最终EFA 报告",
@@ -2419,7 +2463,96 @@ def render_stage3_efa_no_deletion():
 
 
 
+def render_stage4_package_download():
+    st.markdown("---")
+    st.subheader("📦 第四阶段：文件打包下载确认")
+    st.caption("请勾选各量表需要打包下载的报告文件，系统将生成批量 ZIP 压缩包。")
 
+    archive = st.session_state.get("report_archive", {})
+    if not archive:
+        st.info("💡 暂无已确认的报告。请在前三个阶段中分别点击「确认」按钮以归档报告。")
+        return
+
+    selected_files = []  # (filename, bytes)
+    st.markdown("### 📋 量表报告勾选")
+
+    for key, payload in archive.items():
+        display_name = payload.get("display_name", key)
+        had_deletion = payload.get("had_deletion", False)
+        
+        with st.container(border=True):
+            st.markdown(f"**📊 {display_name}** (`{key}`)")
+            
+            has_any = False
+            cols = st.columns(3)
+            
+            # Stage 1
+            stage1 = payload.get("stage1")
+            if stage1:
+                has_any = True
+                with cols[0]:
+                    default_s1 = not had_deletion  # CFA没删题时，默认需要阶段1报告
+                    chk1 = st.checkbox(
+                        "📄 阶段1：自动删题 EFA",
+                        value=default_s1,
+                        key=f"pkg_chk1_{key}"
+                    )
+                    if chk1:
+                        selected_files.append((stage1["filename"], stage1["bytes"]))
+            
+            # Stage 2
+            stage2 = payload.get("stage2")
+            if stage2:
+                has_any = True
+                with cols[1]:
+                    default_s2 = True  # 阶段2总是默认勾上
+                    chk2 = st.checkbox(
+                        "📄 阶段2：自动删题 CFA",
+                        value=default_s2,
+                        key=f"pkg_chk2_{key}"
+                    )
+                    if chk2:
+                        selected_files.append((stage2["filename"], stage2["bytes"]))
+            
+            # Stage 3
+            stage3 = payload.get("stage3")
+            if stage3:
+                has_any = True
+                with cols[2]:
+                    default_s3 = had_deletion  # CFA有删题时，默认需要阶段3报告
+                    chk3 = st.checkbox(
+                        "📄 阶段3：最终不删题 EFA",
+                        value=default_s3,
+                        key=f"pkg_chk3_{key}"
+                    )
+                    if chk3:
+                        selected_files.append((stage3["filename"], stage3["bytes"]))
+            
+            if not has_any:
+                st.caption("⚠️ 该量表暂无已归档报告")
+
+    st.markdown("---")
+    
+    if selected_files:
+        st.success(f"✅ 已勾选 **{len(selected_files)}** 个文件，准备打包下载。")
+        
+        import zipfile
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fname, fbytes in selected_files:
+                zf.writestr(fname, fbytes)
+        zip_buf.seek(0)
+        
+        today_str = date.today().strftime("%Y-%m-%d")
+        st.download_button(
+            label=f"⬇️ 下载选中报告打包 ({len(selected_files)} 个文件)",
+            data=zip_buf.getvalue(),
+            file_name=f"N1_Analysis_Reports_{today_str}.zip",
+            mime="application/zip",
+            use_container_width=True,
+        )
+    else:
+        st.warning("⚠️ 请至少勾选一项报告以进行打包下载。")
 
 
 
@@ -2437,26 +2570,27 @@ def render_stage3_efa_no_deletion():
 
 
 # ==============================================================================
-# 🌟 顶层三大板块隔离调度中心
+# 🌟 顶层板块隔离调度中心
 # ==============================================================================
 def render_n1_analysis():
     st.title("模块 2: N1 分析")
 
-    # 使用 st.tabs 将三大核心分析板块在水平方向彻底隔离
-    tab_efa_clean, tab_cfa_clean, tab_efa_final = st.tabs([
+    # 使用 st.tabs 将四大核心分析板块在水平方向彻底隔离
+    tab_efa_clean, tab_cfa_clean, tab_efa_final, tab_package = st.tabs([
         "1. 自动删题 EFA", 
         "2. 自动删题 CFA", 
-        "3. 最终不删题 EFA"
+        "3. 最终不删题 EFA",
+        "4. 文件打包下载"
     ])
 
-    # 板块一：直接渲染原逻辑改名后的核心 EFA
     with tab_efa_clean:
         render_stage1_efa_clean()
 
-    # 板块二：自动删题 CFA (读取 Stage 1 的 N1_preEFA 资产进行分析)
     with tab_cfa_clean:
         render_stage2_cfa_clean()
 
-    # 板块三：不删题 EFA (用于最终论文汇报或验证最终锁定的题目)
     with tab_efa_final:
         render_stage3_efa_no_deletion()
+        
+    with tab_package:
+        render_stage4_package_download()
