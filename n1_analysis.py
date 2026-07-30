@@ -2045,8 +2045,7 @@ def render_stage2_cfa_clean():
                         st.session_state[f"n2_{sub_name}_measure_id"] = mid
 
                         # ---- 下载报告 ----
-                
-                       _generate_and_download_report(
+                        _generate_and_download_report(
                             sub_name=sub_name,
                             cfg=cfg,
                             final_df_cfa=final_df_cfa,
@@ -2057,6 +2056,8 @@ def render_stage2_cfa_clean():
                             mname=mname,
                             measure_id=st.session_state[f"n2_{sub_name}_measure_id"],
                         )
+                
+                      
 
 
     
