@@ -2877,7 +2877,7 @@ def render_multi_cfa():
                         ho_dataset_n = int(m_ho.group(1)) if m_ho else 4
                     else:
                         ho_dataset_n = int(st.session_state.get("n3_ho_scored_dataset_n", 1))
-                    ho_scored_base = f"{ho_mgid_dl}_higher_cfa_dataset{ho_dataset_n}_scored_{ho_today}_{ho_safe_user}"
+                    ho_scored_base = f"{ho_mgid_dl}_higher_cfa_dataset{ho_dataset_n}_scored_{ho_today}"
                     with dl_col1:
                         if st.session_state.get("n3_ho_scored_csv_bytes"):
                             st.download_button(
@@ -2973,7 +2973,7 @@ def render_multi_cfa():
                     ho_formula_user = st.session_state.get("user_name", "unknown_user")
                     ho_formula_safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(ho_formula_user)).strip() or "unknown_user"
                     ho_formula_today = date.today().strftime("%Y-%m-%d")
-                    ho_formula_base = f"{ho_formula_mgid}_higher_cfa_final_score_formula_{ho_formula_today}_{ho_formula_safe_user}"
+                    ho_formula_base = f"{ho_formula_mgid}_higher_cfa_final_score_formula_{ho_formula_today}"
                     with hf_dl1:
                         if st.session_state.get("n3_ho_formula_csv_bytes"):
                             st.download_button(
@@ -3829,7 +3829,7 @@ def render_batch_multi_cfa():
                         today = date.today().strftime("%Y-%m-%d")
                         user_name = st.session_state.get("user_name", "unknown_user")
                         safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
-                        filename = f"{safe_mgid}_{cfa_type}_report_{today}_{safe_user}.xlsx"
+                        filename = f"{safe_mgid}_{cfa_type}_report_{today}.xlsx"
 
                         st.session_state[f"n4_report_bytes_{group['name']}"] = xbuf.getvalue()
                         st.session_state[f"n4_report_filename_{group['name']}"] = filename
@@ -3936,7 +3936,7 @@ def render_batch_multi_cfa():
                     user = st.session_state.get("user_name", "unknown_user")
                     safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user)).strip() or "unknown_user"
                     cfa_type = "prelim_multi_cfa" if st.session_state.get("n4_prelim") else "multi_cfa"
-                    scored_base = f"{mgid_dl}_{cfa_type}_scored_{today}_{safe_user}"
+                    scored_base = f"{mgid_dl}_{cfa_type}_scored_{today}"
                     with dl_c1:
                         if st.session_state.get(f"n4_scored_csv_{group['name']}"):
                             st.download_button(
@@ -4034,7 +4034,7 @@ def render_batch_multi_cfa():
                     user_f = st.session_state.get("user_name", "unknown_user")
                     safe_user_f = re.sub(r'[\\/:*?"<>|]+', '_', str(user_f)).strip() or "unknown_user"
                     cfa_type_f = "prelim_multi_cfa" if st.session_state.get("n4_prelim") else "multi_cfa"
-                    formula_base = f"{mgid_f}_{cfa_type_f}_final_score_formula_{today_f}_{safe_user_f}"
+                    formula_base = f"{mgid_f}_{cfa_type_f}_final_score_formula_{today_f}"
                     with dl_f1:
                         if st.session_state.get(f"n4_formula_csv_{group['name']}"):
                             st.download_button(
