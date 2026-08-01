@@ -2104,7 +2104,7 @@ def render_stage2_cfa_clean():
                 st.markdown(f"**{mid}**（因子：{factor_name}，共 {len(kept)} 题）")
                 # 一个题目一行
                 for item in kept:
-                    st.write(f"• {item}")
+                    st.write(f" {item}")
                 st.markdown("---")  # 量表之间加分隔线（可选）
 
 
