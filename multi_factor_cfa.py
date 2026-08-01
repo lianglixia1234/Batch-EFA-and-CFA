@@ -476,6 +476,22 @@ def _build_multifactor_report_tables(
                 load_unstd[(f, item_safe)] = _to_num(r.get("Estimate", np.nan))
                 load_std[(f, item_safe)] = _to_num(r.get("Std.all", np.nan))
 
+    # method factor loadings（仅 method 题目有值，其余留空）
+    method_load_unstd: Dict[str, float] = {}
+    method_load_std: Dict[str, float] = {}
+    method_eq_rows = estimates[(estimates["op"] == "=~") & (estimates["LHS"] == "method")]
+    for _, r in method_eq_rows.iterrows():
+        item_safe = str(r["RHS"])
+        method_load_unstd[item_safe] = _to_num(r.get("Estimate", np.nan))
+        method_load_std[item_safe] = _to_num(r.get("Std.all", np.nan))
+    method_reg_rows = estimates[(estimates["op"] == "~") & (estimates["RHS"] == "method")]
+    for _, r in method_reg_rows.iterrows():
+        item_safe = str(r["LHS"])
+        if item_safe not in method_load_unstd:
+            method_load_unstd[item_safe] = _to_num(r.get("Estimate", np.nan))
+            method_load_std[item_safe] = _to_num(r.get("Std.all", np.nan))
+    
+    
     # Composite Reliability (CR_G): 对 overall equal-weight composite 计算一次并复用到每题行
     cr_overall = np.nan
     cr_reason = ""
@@ -580,6 +596,8 @@ def _build_multifactor_report_tables(
                 disp = factor_to_display[fx]
                 row[f"unstandardised_loading_{disp}"] = load_unstd.get((fx, safe_col), np.nan)
                 row[f"standardised_loading_{disp}"] = load_std.get((fx, safe_col), np.nan)
+            row["unstandardised_loading_method"] = method_load_unstd.get(safe_col, np.nan)
+            row["standardised_loading_method"] = method_load_std.get(safe_col, np.nan)
             rows.append(row)
 
     items_sheet = pd.DataFrame(rows)
@@ -692,6 +710,23 @@ def _build_higherorder_report_tables(
                 load_unstd[(f, item_safe)] = _to_num(r.get("Estimate", np.nan))
                 load_std[(f, item_safe)] = _to_num(r.get("Std.all", np.nan))
 
+    # method factor loadings（仅 method 题目有值，其余留空）
+    # method factor loadings（仅 method 题目有值，其余留空）
+    method_load_unstd: Dict[str, float] = {}
+    method_load_std: Dict[str, float] = {}
+    method_eq_rows = estimates[(estimates["op"] == "=~") & (estimates["LHS"] == "method")]
+    for _, r in method_eq_rows.iterrows():
+        item_safe = str(r["RHS"])
+        method_load_unstd[item_safe] = _to_num(r.get("Estimate", np.nan))
+        method_load_std[item_safe] = _to_num(r.get("Std.all", np.nan))
+    method_reg_rows = estimates[(estimates["op"] == "~") & (estimates["RHS"] == "method")]
+    for _, r in method_reg_rows.iterrows():
+        item_safe = str(r["LHS"])
+        if item_safe not in method_load_unstd:
+            method_load_unstd[item_safe] = _to_num(r.get("Estimate", np.nan))
+            method_load_std[item_safe] = _to_num(r.get("Std.all", np.nan))
+    
+    
     fit_vals = {
         "chi2_user_model": _get_any_stat(stats_dict, ["chi2", "Chi2"]),
         "df_user_model": _get_any_stat(stats_dict, ["DoF", "dof", "df"]),
@@ -814,6 +849,8 @@ def _build_higherorder_report_tables(
                 disp = factor_to_display[fx]
                 row[f"unstandardised_loading_{disp}"] = load_unstd.get((fx, safe_col), np.nan)
                 row[f"standardised_loading_{disp}"] = load_std.get((fx, safe_col), np.nan)
+            row["unstandardised_loading_method"] = method_load_unstd.get(safe_col, np.nan)
+            row["standardised_loading_method"] = method_load_std.get(safe_col, np.nan)
             sheet1_rows.append(row)
 
     sheet1 = pd.DataFrame(sheet1_rows)
@@ -2999,9 +3036,6 @@ def render_multi_cfa():
 # ==============================================================================
 # 批量 Multi-Factor CFA（基于 Single-Factor 确认结果）
 # ==============================================================================
-# ==============================================================================
-# 批量 Multi-Factor CFA 核心算法（基于 Single-Factor CFA 确认结果）
-# ==============================================================================
 
 def _run_multi_cfa_and_extract(df_clean, measure_items_map, method_items_by_measure):
     """运行 Multi-factor Correlated CFA 并提取关键指标，返回统一格式的结果字典"""
@@ -3449,11 +3483,26 @@ def render_batch_multi_cfa():
                 method_items_m = [item for item in orig_method if item in items]
                 method_items_by_measure[m] = method_items_m
 
-            st.markdown("##### 各 Measure 题目清单")
-            for m, items in measure_items_map.items():
-                method_m = method_items_by_measure.get(m, [])
-                st.write(f"**{m}**：{len(items)} 题（方法因子：{len(method_m)} 题）")
-                st.caption(", ".join(items[:15]) + ("..." if len(items) > 15 else ""))
+                st.markdown("##### 各 Measure 题目清单（可勾选调整）")
+                for m in group["measures"]:
+                    if m not in measure_items_map:
+                        continue
+                    cfg = st.session_state.get("batch_measures_config", {}).get(m, {})
+                    # 优先取该 measure 原始全部题目作为可选项，若无则退化为当前保留题目
+                    all_available = cfg.get("items", measure_items_map.get(m, []))
+                    all_options = list(dict.fromkeys(list(all_available) + list(measure_items_map.get(m, []))))
+                    current_items = measure_items_map.get(m, [])
+                    pick = smart_multiselect(
+                        options=all_options,
+                        label=f"**{m}** 题目选择",
+                        key_suffix=f"n4_batch_latent_items_{_sanitize_name(m)}_{_sanitize_name(group['name'])}",
+                        default_selected=current_items,
+                        show_selection_controls=True,
+                    )
+                    pick = [x for x in pick if x in all_options]
+                    measure_items_map[m] = pick
+                    method_m = method_items_by_measure.get(m, [])
+                    st.caption(f"{m}：{len(pick)} 题（方法因子：{len(method_m)} 题）")
 
             st.markdown("##### 方法因子题目微调（可选）")
             for m in group["measures"]:
@@ -3953,7 +4002,7 @@ def render_batch_multi_cfa():
                                 preview_flat[col] = val
                         st.dataframe(preview_flat.head(20), use_container_width=True)
 
-                    dl_f1, dl_f2 = st.columns(2)
+                    dl_f1, dl_f2, dl_f3, dl_f4 = st.columns(4)
                     mgid_f = _safe_filename_part(str(measuregroup_title).strip() or "measuregroup", "measuregroup")
                     today_f = date.today().strftime("%Y-%m-%d")
                     user_f = st.session_state.get("user_name", "unknown_user")
@@ -3978,6 +4027,43 @@ def render_batch_multi_cfa():
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key=f"n4_dl_formula_xlsx_{group['name']}"
                             )
+                    with dl_f3:
+                        m_df_f = st.session_state.get(f"n4_formula_measure_df_{group['name']}")
+                        i_df_f = st.session_state.get(f"n4_formula_items_df_{group['name']}")
+                        if m_df_f is not None and i_df_f is not None:
+                            if build_formula_params_json:
+                                json_bytes_f = build_formula_params_json(m_df_f, i_df_f).encode("utf-8")
+                            else:
+                                import json
+                                def _native(v):
+                                    if v is None or isinstance(v, (str, int, float, bool)):
+                                        return v
+                                    if hasattr(v, "item"):
+                                        v = float(v) if hasattr(v, "__float__") else v
+                                        return None if (v != v or abs(v) == float("inf")) else v
+                                    return str(v) if hasattr(v, "isoformat") else v
+                                m_dict_f = {k: _native(v) for k, v in m_df_f.iloc[0].to_dict().items()}
+                                items_list_f = [{k: _native(v) for k, v in r.items()} for r in i_df_f.to_dict(orient="records")]
+                                json_bytes_f = json.dumps({"schema_version": 1, "measure": m_dict_f, "items": items_list_f}, ensure_ascii=False, indent=2).encode("utf-8")
+                            st.download_button(
+                                "⬇️ 下载公式参数（JSON）",
+                                data=json_bytes_f,
+                                file_name=f"{formula_base}.json",
+                                mime="application/json",
+                                key=f"n4_dl_formula_json_{group['name']}"
+                            )
+                    with dl_f4:
+                        if _DB_SAVE_AVAILABLE and save_formula_params and st.button("☁️ 保存公式参数到云端", key=f"n4_save_formula_cloud_{group['name']}"):
+                            m_df_f = st.session_state.get(f"n4_formula_measure_df_{group['name']}")
+                            i_df_f = st.session_state.get(f"n4_formula_items_df_{group['name']}")
+                            if m_df_f is not None and i_df_f is not None:
+                                ok, msg = save_formula_params(m_df_f, i_df_f)
+                                if ok:
+                                    st.success(msg)
+                                else:
+                                    st.error(f"保存失败: {msg}")
+                            else:
+                                st.error("公式表未就绪，请先生成公式参数表。")
 
     # ==========================================================
     # 6. 全局确认清单（底部看板）
