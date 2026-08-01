@@ -737,35 +737,40 @@ def render_single_cfa():
                                 break
 
                         # 载荷：与「Latent Variables (Factor Loadings) & Covariances」表同一逻辑取数
-                        # 兼容 semopy 两种常见表示：
+                        # 提取载荷（兼容 semopy 两种常见表示）
                         # A) op='=~' 且 LHS=潜变量, RHS=题目
                         # B) op='~'  且 RHS=潜变量, LHS=题目
                         loadings_unstd = {}
                         loadings_std = {}
-                        if "LHS" in est.columns and "op" in est.columns and "RHS" in est.columns:
+                        if {"LHS", "op", "RHS"}.issubset(est.columns):
                             trait_loadings = est[(est["op"] == "=~") & (est["LHS"] == fname)]
                             if not trait_loadings.empty:
-                                for _, row in trait_loadings.iterrows():
-                                    item_key = row["RHS"]
-                                    loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in est.columns else np.nan
-                                    loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in est.columns else np.nan
+                                for _, r in trait_loadings.iterrows():   # ✅ 统一用 r
+                                    loadings_unstd[str(r["RHS"])] = _to_num(r["Estimate"]) if "Estimate" in est.columns else np.nan
+                                    loadings_std[str(r["RHS"])] = _to_num(r["Std.all"]) if "Std.all" in est.columns else np.nan
                             else:
                                 trait_loadings = est[(est["op"] == "~") & (est["RHS"] == fname)]
-                                for _, row in trait_loadings.iterrows():
-                                    item_key = row["LHS"]
-                                    loadings_unstd[item_key] = _to_num(row["Estimate"]) if "Estimate" in est.columns else np.nan
-                                    loadings_std[item_key] = _to_num(row["Std.all"]) if "Std.all" in est.columns else np.nan
+                                for _, r in trait_loadings.iterrows():   # ✅ 统一用 r
+                                    loadings_unstd[str(r["LHS"])] = _to_num(r["Estimate"]) if "Estimate" in est.columns else np.nan
+                                    loadings_std[str(r["LHS"])] = _to_num(r["Std.all"]) if "Std.all" in est.columns else np.nan
 
                         # 提取方法因子载荷（新增）
                         loadings_unstd_method = {}
                         loadings_std_method = {}
-                        mname = method_name  # 方法因子名
+                        # ✅ 用运行时保存的名字，防止用户改完输入框没重跑CFA
+                        mname = st.session_state.get("n2_method_name", method_name)
                         if {"LHS", "op", "RHS"}.issubset(est.columns):
+                            # 兼容 semopy 两种常见表示
                             method_load_rows = est[(est["op"] == "=~") & (est["LHS"] == mname)]
                             if not method_load_rows.empty:
                                 for _, r in method_load_rows.iterrows():
                                     loadings_unstd_method[str(r["RHS"])] = _to_num(r.get("Estimate", np.nan))
                                     loadings_std_method[str(r["RHS"])] = _to_num(r.get("Std.all", np.nan))
+                            else:
+                                method_load_rows = est[(est["op"] == "~") & (est["RHS"] == mname)]
+                                for _, r in method_load_rows.iterrows():
+                                    loadings_unstd_method[str(r["LHS"])] = _to_num(r.get("Estimate", np.nan))
+                                    loadings_std_method[str(r["LHS"])] = _to_num(r.get("Std.all", np.nan))
                                     
                         chi2_val = _get_any(stats_dict, ["chi2", "Chi2"])
                         dof_val = _get_any(stats_dict, ["DoF", "dof", "df"])
@@ -855,8 +860,8 @@ def render_single_cfa():
                                 "unstandardised_loading": loadings_unstd.get(item_clean, np.nan),
                                 "standardised_loading": loadings_std.get(item_clean, np.nan),
                                 # ✅ 新增两个字段（仅反向题有值，非反向题为 np.nan）
-                                "unstandardised_loading_method": loadings_unstd_method.get(item, np.nan) if rev == 1 else np.nan,
-                                "standardised_loading_method": loadings_std_method.get(item, np.nan) if rev == 1 else np.nan,
+                                "unstandardised_loading_method": loadings_unstd_method.get(item_clean, np.nan) if rev == 1 else np.nan,
+                                "standardised_loading_method": loadings_std_method.get(item_clean, np.nan) if rev == 1 else np.nan,
                                 "chi2_user_model": chi2_val,
                                 "df_user_model": dof_val,
                                 "p_value_user_model": p_val,
@@ -2738,13 +2743,20 @@ def render_batch_cfa():
                         # 提取方法因子载荷（新增）
                         loadings_unstd_method = {}
                         loadings_std_method = {}
-                        mname = "Method"
+                        # ✅ 从 confirmed 取实际运行时的方法因子名，不要硬编码
+                        mname = confirmed.get('method_name', 'Method')
                         if {"LHS", "op", "RHS"}.issubset(estimates.columns):
+                            # 兼容 semopy 两种常见表示
                             method_load_rows = estimates[(estimates["op"] == "=~") & (estimates["LHS"] == mname)]
                             if not method_load_rows.empty:
                                 for _, r in method_load_rows.iterrows():
                                     loadings_unstd_method[str(r["RHS"])] = _to_num(r.get("Estimate", np.nan))
                                     loadings_std_method[str(r["RHS"])] = _to_num(r.get("Std.all", np.nan))
+                            else:
+                                method_load_rows = estimates[(estimates["op"] == "~") & (estimates["RHS"] == mname)]
+                                for _, r in method_load_rows.iterrows():
+                                    loadings_unstd_method[str(r["LHS"])] = _to_num(r.get("Estimate", np.nan))
+                                    loadings_std_method[str(r["LHS"])] = _to_num(r.get("Std.all", np.nan))
                         
                         
                         # 提取潜变量方差
