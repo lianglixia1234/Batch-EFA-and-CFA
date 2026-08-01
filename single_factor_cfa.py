@@ -2781,8 +2781,8 @@ def render_batch_cfa():
                                 "unstandardised_loading": loadings_unstd.get(item, np.nan),
                                 "standardised_loading": loadings_std.get(item, np.nan),
                                 # ✅ 新增两个字段（仅反向题有值，非反向题为 np.nan）
-                                "unstandardised_loading_method": loadings_unstd_method.get(item_clean, np.nan) if rev == 1 else np.nan,
-                                "standardised_loading_method": loadings_std_method.get(item_clean, np.nan) if rev == 1 else np.nan,
+                                "unstandardised_loading_method": loadings_unstd_method.get(item, np.nan) if rev == 1 else np.nan,
+                                "standardised_loading_method": loadings_std_method.get(item, np.nan) if rev == 1 else np.nan,
                                 "chi2_user_model": _extract_fit_val(stats_dict, "chi2"),
                                 "df_user_model": _extract_fit_val(stats_dict, "DoF"),
                                 "p_value_user_model": _extract_fit_val(stats_dict, "chi2 p-value"),
