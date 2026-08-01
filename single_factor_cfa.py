@@ -837,6 +837,8 @@ def render_single_cfa():
                             return fallback_idx
 
                         sorted_items = sort_item_cols_by_number(factor_items)
+                        # 添加清洗映射（如果还没有的话）
+                        item_clean_map = {item: re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(item)) for item in sorted_items}
                         rows = []
                         for idx, item in enumerate(sorted_items, start=1):
                             _, num, text = parse_item_col(item)
@@ -853,8 +855,8 @@ def render_single_cfa():
                                 "unstandardised_loading": loadings_unstd.get(item_clean, np.nan),
                                 "standardised_loading": loadings_std.get(item_clean, np.nan),
                                 # ✅ 新增两个字段（仅反向题有值，非反向题为 np.nan）
-                                "unstandardised_loading_method": loadings_unstd_method.get(item, np.nan) if rev == 1 else np.nan,
-                                "standardised_loading_method": loadings_std_method.get(item, np.nan) if rev == 1 else np.nan,
+                                "unstandardised_loading_method": loadings_unstd_method.get(item_clean, np.nan) if rev == 1 else np.nan,
+                                "standardised_loading_method": loadings_std_method.get(item_clean, np.nan) if rev == 1 else np.nan,
                                 "chi2_user_model": chi2_val,
                                 "df_user_model": dof_val,
                                 "p_value_user_model": p_val,
@@ -2796,6 +2798,8 @@ def render_batch_cfa():
                         
                         # 构建题目明细表
                         sorted_items = sort_item_cols_by_number(final['items'])
+                        # 添加清洗映射（如果还没有的话）
+                        item_clean_map = {item: re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(item)) for item in sorted_items}
                         rows = []
                         for idx_i, item in enumerate(sorted_items, start=1):
                             _, num, text = parse_item_col(item)
@@ -2810,8 +2814,8 @@ def render_batch_cfa():
                                 "unstandardised_loading": loadings_unstd.get(item, np.nan),
                                 "standardised_loading": loadings_std.get(item, np.nan),
                                 # ✅ 新增两个字段（仅反向题有值，非反向题为 np.nan）
-                                "unstandardised_loading_method": loadings_unstd_method.get(item, np.nan) if rev == 1 else np.nan,
-                                "standardised_loading_method": loadings_std_method.get(item, np.nan) if rev == 1 else np.nan,
+                                "unstandardised_loading_method": loadings_unstd_method.get(item_clean, np.nan) if rev == 1 else np.nan,
+                                "standardised_loading_method": loadings_std_method.get(item_clean, np.nan) if rev == 1 else np.nan,
                                 "chi2_user_model": _extract_fit_val(stats_dict, "chi2"),
                                 "df_user_model": _extract_fit_val(stats_dict, "DoF"),
                                 "p_value_user_model": _extract_fit_val(stats_dict, "chi2 p-value"),
