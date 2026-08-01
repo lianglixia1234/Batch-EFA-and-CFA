@@ -3362,8 +3362,7 @@ def render_batch_cfa():
                 "CFI": f"{final['cfi']:.3f}" if not np.isnan(final['cfi']) else "N/A",
                 "TLI": f"{final['tli']:.3f}" if not np.isnan(final['tli']) else "N/A",
                 "RMSEA": f"{final['rmsea']:.3f}" if not np.isnan(final['rmsea']) else "N/A",
-                "SRMR": f"{final['srmr']:.3f}" if not np.isnan(final['srmr']) else "N/A",
-                "保留题目": ", ".join(final['items']),
+                "SRMR": f"{final['srmr']:.3f}" if not np.isnan(final['srmr']) else "N/A"
             })
         
         summary_df = pd.DataFrame(summary_rows)
