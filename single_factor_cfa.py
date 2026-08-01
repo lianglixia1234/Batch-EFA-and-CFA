@@ -3399,7 +3399,7 @@ def render_batch_cfa():
                     # 下划线替换为空格，显示更友好
                     display_text = (text or item).replace("_", " ")
                     item_detail_rows.append({
-                        "列名": item
+                        "题目": item
                     })
                 if item_detail_rows:
                     df_display = pd.DataFrame(item_detail_rows)
@@ -3408,7 +3408,7 @@ def render_batch_cfa():
                         use_container_width=True,
                         hide_index=True,
                         column_config={
-                            "列名": st.column_config.TextColumn("列名", width="medium")
+                            "题目": st.column_config.TextColumn("题目", width="medium")
                         }
                     )
                 else:
