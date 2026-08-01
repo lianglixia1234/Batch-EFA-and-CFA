@@ -23,7 +23,6 @@ except ImportError:
 # ==============================================================================
 # 核心算法区域 (增强版)
 # ==============================================================================
-
 def _is_reverse_coded(item_name):
     """判断题目是否为反向题：仅当题目文本去尾部空白/标点后以 r 结尾。"""
     if not isinstance(item_name, str):
@@ -31,8 +30,10 @@ def _is_reverse_coded(item_name):
     _, _, text = parse_item_col(item_name)
     s = (text or item_name).strip()
     s = s.replace("ｒ", "r").replace("Ｒ", "R")
-    s = re.sub(r"""[\s\u3000\)\]）】》〉'"“”’`~!@#$%^&*+=|\\/:;,.?，。！？、；：-]+$""", "", s)
+    # 修复：加入下划线 _ 到尾部可去除字符中
+    s = re.sub(r"""[\s\u3000\)\]）】》〉'"“”’`~!@#$%^&*+=|\\/:;,.?，。！？、；：_-]+$""", "", s)
     return s.lower().endswith("r")
+    
 
 
 def _extract_item_num_and_text(col_name: str) -> Tuple[Any, str]:
