@@ -3375,34 +3375,41 @@ def render_batch_cfa():
                 m_name = row['Measure']
                 st.markdown(f"**{m_name}**（{row['采用标准']}，{row['保留题目数']} 题）")
                 
-                # 一个题目一行
                 final_items = confirmed_measures.get(m_name, {}).get('final', {}).get('items', [])
                 item_detail_rows = []
                 for idx_i, item in enumerate(final_items, start=1):
                     _, num, text = parse_item_col(item)
                     rev = "是" if _is_reverse_coded(item) else "否"
+                    # 下划线替换为空格，显示更友好
+                    display_text = (text or item).replace("_", " ")
                     item_detail_rows.append({
                         "序号": idx_i,
                         "题号": num if num is not None else "-",
                         "列名": item,
-                        "题目文本": text or "-",
+                        "题目文本": display_text,
                         "反向题": rev,
                     })
                 if item_detail_rows:
-                    st.dataframe(pd.DataFrame(item_detail_rows), use_container_width=True, hide_index=True)
+                    df_display = pd.DataFrame(item_detail_rows)
+                    st.dataframe(
+                        df_display,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "题目文本": st.column_config.TextColumn(
+                                "题目文本",
+                                width="large",
+                                max_chars=None,  # 不截断，完整显示
+                            ),
+                            "列名": st.column_config.TextColumn("列名", width="medium"),
+                            "序号": st.column_config.NumberColumn("序号", width="small"),
+                            "题号": st.column_config.TextColumn("题号", width="small"),
+                            "反向题": st.column_config.TextColumn("反向题", width="small"),
+                        }
+                    )
                 else:
                     st.caption("无保留题目")
                 st.markdown("---")
-
-
-
-
-
-
-
-
-
-
 
 
 
