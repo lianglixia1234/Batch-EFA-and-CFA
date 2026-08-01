@@ -2467,6 +2467,16 @@ def render_batch_cfa():
             s1_final = s1['final'] if s1 else None
             s2_final = s2['final'] if s2 else None
 
+            # 汇总指标单独展示
+            st.markdown("###### 汇总指标")
+            sum_cols = st.columns(4)
+            if s1_final:
+                sum_cols[0].metric("标准1 CFI", f"{s1_final['cfi']:.3f}" if not np.isnan(s1_final['cfi']) else "N/A")
+                sum_cols[1].metric("标准1 TLI", f"{s1_final['tli']:.3f}" if not np.isnan(s1_final['tli']) else "N/A")
+            if s2_final:
+                sum_cols[2].metric("标准2 CFI", f"{s2_final['cfi']:.3f}" if not np.isnan(s2_final['cfi']) else "N/A")
+                sum_cols[3].metric("标准2 TLI", f"{s2_final['tli']:.3f}" if not np.isnan(s2_final['tli']) else "N/A")
+
             # ---- 5.1 两个标准的对比表格 ----
             st.markdown("##### 📋 两个标准结果对比（逐题删题记录）")
             
@@ -2512,15 +2522,7 @@ def render_batch_cfa():
             compare_df = pd.DataFrame(compare_rows)
             st.dataframe(compare_df, use_container_width=True, hide_index=True)
             
-            # 汇总指标单独展示
-            st.markdown("###### 汇总指标")
-            sum_cols = st.columns(4)
-            if s1_final:
-                sum_cols[0].metric("标准1 CFI", f"{s1_final['cfi']:.3f}" if not np.isnan(s1_final['cfi']) else "N/A")
-                sum_cols[1].metric("标准1 TLI", f"{s1_final['tli']:.3f}" if not np.isnan(s1_final['tli']) else "N/A")
-            if s2_final:
-                sum_cols[2].metric("标准2 CFI", f"{s2_final['cfi']:.3f}" if not np.isnan(s2_final['cfi']) else "N/A")
-                sum_cols[3].metric("标准2 TLI", f"{s2_final['tli']:.3f}" if not np.isnan(s2_final['tli']) else "N/A")
+            
 
             # ---- 5.2 Stage 1 / Stage 2 详细结果 ----
             detail_tabs = st.tabs(["标准1（保质量）详情", "标准2（求精简）详情"])
