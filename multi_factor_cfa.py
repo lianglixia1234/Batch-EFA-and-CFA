@@ -3468,7 +3468,8 @@ def render_batch_multi_cfa():
     for idx, group in enumerate(st.session_state.n4_multi_groups):
         with group_tabs[idx]:
 
-            # 1. 先构建 measure_items_map 和 method_items_by_measure
+            # ==========================================================
+            # 1. 先构建 measure_items_map 和初始 method_items_by_measure
             # ==========================================================
             measure_items_map = {}
             method_items_by_measure = {}
@@ -3487,14 +3488,13 @@ def render_batch_multi_cfa():
                 method_items_by_measure[m] = method_items_m
 
             # ==========================================================
-            # 2. 显示各 Measure 题目清单（单层循环，避免 key 重复）
+            # 2. 各 Measure 题目清单（可勾选调整）
             # ==========================================================
             st.markdown("##### 各 Measure 题目清单（可勾选调整）")
             for m_idx, m in enumerate(group["measures"]):
                 if m not in measure_items_map:
                     continue
                 cfg = st.session_state.get("batch_measures_config", {}).get(m, {})
-                # 优先取该 measure 原始全部题目作为可选项，若无则退化为当前保留题目
                 all_available = cfg.get("items", measure_items_map.get(m, []))
                 all_options = list(dict.fromkeys(list(all_available) + list(measure_items_map.get(m, []))))
                 current_items = measure_items_map.get(m, [])
@@ -3508,7 +3508,44 @@ def render_batch_multi_cfa():
                 pick = [x for x in pick if x in all_options]
                 measure_items_map[m] = pick
                 method_m = method_items_by_measure.get(m, [])
-                st.caption(f"{m}：{len(pick)} 题（方法因子：{len(method_m)} 题）")
+
+            # ==========================================================
+            # 3. 全局方法因子题目选择（所有 Measure 共用）
+            # ==========================================================
+            st.markdown("##### 方法因子题目选择（全局共用）")
+            # 收集所有 Measure 当前保留题目的并集作为全局选项池
+            all_items_union = []
+            for m in group["measures"]:
+                if m in measure_items_map:
+                    all_items_union.extend(measure_items_map[m])
+            all_items_union = list(dict.fromkeys(all_items_union))
+
+            # 默认预选：取所有 measure 初始方法因子的并集，且仍在当前保留题目中
+            default_method_global = []
+            for m in group["measures"]:
+                if m in method_items_by_measure:
+                    default_method_global.extend(method_items_by_measure[m])
+            default_method_global = list(dict.fromkeys([x for x in default_method_global if x in all_items_union]))
+
+            method_global_selected = st.multiselect(
+                "全局方法因子题目（所有 Measure 共用）",
+                options=all_items_union,
+                default=default_method_global,
+                key=f"n4_group_g{idx}_method_global",
+            )
+            method_global_selected = [x for x in method_global_selected if x in all_items_union]
+
+            # 将全局方法因子题目同步到每个 measure：取交集
+            for m in group["measures"]:
+                if m in measure_items_map:
+                    method_items_by_measure[m] = [x for x in method_global_selected if x in measure_items_map[m]]
+
+            if st.button(f"✅ 确认 {group['name']} 配置", key=f"n4_confirm_cfg_{group['name']}"):
+                st.session_state[f"n4_cfg_{group['name']}"] = {
+                    "measure_items_map": measure_items_map,
+                    "method_items_by_measure": method_items_by_measure,
+                }
+                st.success(f"{group['name']} 配置已确认，可一键批量运行。")
 
             # ==========================================================
             # 3. 方法因子题目微调（独立循环，使用自己的 enumerate 索引）
