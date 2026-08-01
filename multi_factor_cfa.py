@@ -3467,6 +3467,9 @@ def render_batch_multi_cfa():
 
     for idx, group in enumerate(st.session_state.n4_multi_groups):
         with group_tabs[idx]:
+
+            # 1. 先构建 measure_items_map 和 method_items_by_measure
+            # ==========================================================
             measure_items_map = {}
             method_items_by_measure = {}
 
@@ -3483,29 +3486,35 @@ def render_batch_multi_cfa():
                 method_items_m = [item for item in orig_method if item in items]
                 method_items_by_measure[m] = method_items_m
 
-                st.markdown("##### 各 Measure 题目清单（可勾选调整）")
-                for m_idx, m in enumerate(group["measures"]):
-                    if m not in measure_items_map:
-                        continue
-                    cfg = st.session_state.get("batch_measures_config", {}).get(m, {})
-                    # 优先取该 measure 原始全部题目作为可选项，若无则退化为当前保留题目
-                    all_available = cfg.get("items", measure_items_map.get(m, []))
-                    all_options = list(dict.fromkeys(list(all_available) + list(measure_items_map.get(m, []))))
-                    current_items = measure_items_map.get(m, [])
-                    pick = smart_multiselect(
-                        options=all_options,
-                        label=f"**{m}** 题目选择",
-                        key_suffix=f"n4_batch_latent_items_g{idx}_m{m_idx}",
-                        default_selected=current_items,
-                        show_selection_controls=True,
-                    )
-                    pick = [x for x in pick if x in all_options]
-                    measure_items_map[m] = pick
-                    method_m = method_items_by_measure.get(m, [])
-                    st.caption(f"{m}：{len(pick)} 题（方法因子：{len(method_m)} 题）")
-                    
+            # ==========================================================
+            # 2. 显示各 Measure 题目清单（单层循环，避免 key 重复）
+            # ==========================================================
+            st.markdown("##### 各 Measure 题目清单（可勾选调整）")
+            for m_idx, m in enumerate(group["measures"]):
+                if m not in measure_items_map:
+                    continue
+                cfg = st.session_state.get("batch_measures_config", {}).get(m, {})
+                # 优先取该 measure 原始全部题目作为可选项，若无则退化为当前保留题目
+                all_available = cfg.get("items", measure_items_map.get(m, []))
+                all_options = list(dict.fromkeys(list(all_available) + list(measure_items_map.get(m, []))))
+                current_items = measure_items_map.get(m, [])
+                pick = smart_multiselect(
+                    options=all_options,
+                    label=f"**{m}** 题目选择",
+                    key_suffix=f"n4_batch_latent_items_g{idx}_m{m_idx}",
+                    default_selected=current_items,
+                    show_selection_controls=True,
+                )
+                pick = [x for x in pick if x in all_options]
+                measure_items_map[m] = pick
+                method_m = method_items_by_measure.get(m, [])
+                st.caption(f"{m}：{len(pick)} 题（方法因子：{len(method_m)} 题）")
+
+            # ==========================================================
+            # 3. 方法因子题目微调（独立循环，使用自己的 enumerate 索引）
+            # ==========================================================
             st.markdown("##### 方法因子题目微调（可选）")
-            for m in group["measures"]:
+            for m_idx, m in enumerate(group["measures"]):
                 if m not in measure_items_map:
                     continue
                 current_method = method_items_by_measure.get(m, [])
