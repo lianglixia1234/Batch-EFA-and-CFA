@@ -3323,10 +3323,11 @@ def render_batch_cfa():
         # 替换原来的 expander 内容
         with st.expander("🔍 查看各量表保留的题目详情", expanded=False):
             for row in summary_rows:
-                st.markdown(f"**{row['Measure']}**（{row['采用标准']}，{row['保留题目数']} 题）")
+                m_name = row['Measure']
+                st.markdown(f"**{m_name}**（{row['采用标准']}，{row['保留题目数']} 题）")
                 
-                # ✅ 改为一个题目一行展示
-                final_items = confirmed_measures.get(row['Measure'], {}).get('final', {}).get('items', [])
+                # 一个题目一行
+                final_items = confirmed_measures.get(m_name, {}).get('final', {}).get('items', [])
                 item_detail_rows = []
                 for idx_i, item in enumerate(final_items, start=1):
                     _, num, text = parse_item_col(item)
