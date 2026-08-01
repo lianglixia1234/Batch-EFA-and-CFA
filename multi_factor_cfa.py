@@ -3075,10 +3075,10 @@ def _run_multi_cfa_and_extract(df_clean, measure_items_map, method_items_by_meas
     if err:
         return None, err
 
-    cfi = _get_any_stat(stats_dict, "CFI")
-    tli = _get_any_stat(stats_dict, "TLI")
-    rmsea = _get_any_stat(stats_dict, "RMSEA")
-    srmr = _get_any_stat(stats_dict, "SRMR")
+    cfi = _get_any_stat(stats_dict, ["CFI"])
+    tli = _get_any_stat(stats_dict, ["TLI"])
+    rmsea = _get_any_stat(stats_dict, ["RMSEA"])
+    srmr = _get_any_stat(stats_dict, ["SRMR"])
 
     per_measure_n = {m: len(measure_items_map.get(m, [])) for m in dataset_names}
 
