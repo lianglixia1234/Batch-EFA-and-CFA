@@ -2102,7 +2102,10 @@ def render_stage2_cfa_clean():
                 kept = payload.get("kept_items", [])
                 factor_name = payload.get("factor_name", "-")
                 st.markdown(f"**{mid}**（因子：{factor_name}，共 {len(kept)} 题）")
-                st.caption(", ".join(kept))
+                # 一个题目一行
+                for item in kept:
+                    st.write(f"• {item}")
+                st.markdown("---")  # 量表之间加分隔线（可选）
 
 
 
