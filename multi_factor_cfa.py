@@ -3547,29 +3547,9 @@ def render_batch_multi_cfa():
                 }
                 st.success(f"{group['name']} 配置已确认，可一键批量运行。")
 
-            # ==========================================================
-            # 3. 方法因子题目微调（独立循环，使用自己的 enumerate 索引）
-            # ==========================================================
-            st.markdown("##### 方法因子题目微调（可选）")
-            for m_idx, m in enumerate(group["measures"]):
-                if m not in measure_items_map:
-                    continue
-                current_method = method_items_by_measure.get(m, [])
-                available = measure_items_map[m]
-                pick = st.multiselect(
-                    f"{m} 的方法因子题目",
-                    options=available,
-                    default=current_method,
-                    key=f"n4_group_g{idx}_method_m{m_idx}",
-                )
-                method_items_by_measure[m] = [x for x in pick if x in available]
+            
 
-            if st.button(f"✅ 确认 {group['name']} 配置", key=f"n4_confirm_cfg_{group['name']}"):
-                st.session_state[f"n4_cfg_{group['name']}"] = {
-                    "measure_items_map": measure_items_map,
-                    "method_items_by_measure": method_items_by_measure,
-                }
-                st.success(f"{group['name']} 配置已确认，可一键批量运行。")
+    
 
     # ==========================================================
     # 4. 一键批量运行
