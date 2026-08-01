@@ -852,8 +852,8 @@ def render_single_cfa():
                                 "unstandardised_loading": loadings_unstd.get(item_clean, np.nan),
                                 "standardised_loading": loadings_std.get(item_clean, np.nan),
                                 # ✅ 新增两个字段（仅反向题有值，非反向题为 np.nan）
-                                "unstandardised_loading_method": loadings_unstd_method.get(item_clean, np.nan) if rev == 1 else np.nan,
-                                "standardised_loading_method": loadings_std_method.get(item_clean, np.nan) if rev == 1 else np.nan,
+                                "unstandardised_loading_method": loadings_unstd_method.get(item, np.nan) if rev == 1 else np.nan,
+                                "standardised_loading_method": loadings_std_method.get(item, np.nan) if rev == 1 else np.nan,
                                 "chi2_user_model": chi2_val,
                                 "df_user_model": dof_val,
                                 "p_value_user_model": p_val,
@@ -1379,6 +1379,7 @@ def render_single_cfa():
                             st.success(msg)
                         else:
                             st.error(f"保存失败: {msg}")
+                
                 with f4:
                     m_df = st.session_state.get("n2_formula_measure_df")
                     i_df = st.session_state.get("n2_formula_items_df")
@@ -1397,6 +1398,10 @@ def render_single_cfa():
                             m_dict = {k: _native(v) for k, v in m_df.iloc[0].to_dict().items()}
                             items_list = [{k: _native(v) for k, v in r.items()} for r in i_df.to_dict(orient="records")]
                             json_bytes = json.dumps({"schema_version": 1, "measure": m_dict, "items": items_list}, ensure_ascii=False, indent=2).encode("utf-8")
+                        
+                        # ✅ 新增：保存到 session_state 供批量下载使用
+                        st.session_state.n2_formula_json_bytes = json_bytes
+                        
                         json_fn = f"{formula_base}.json"
                         st.download_button(
                             "⬇️ 下载公式参数表（JSON）",
@@ -1405,6 +1410,29 @@ def render_single_cfa():
                             mime="application/json",
                             key="n2_download_formula_json",
                         )
+
+                # ✅ 新增：批量下载（Excel + JSON 打包 ZIP）
+                st.markdown("")
+                if st.session_state.get("n2_formula_xlsx_bytes") and st.session_state.get("n2_formula_json_bytes"):
+                    import zipfile
+                    zip_buf = io.BytesIO()
+                    cfa_type_f = "prelim_single_cfa" if st.session_state.get("n2_prelim_single_cfa") else "single_cfa"
+                    safe_mid_f = re.sub(r'[\\/:*?"<>|]+', '_', str(formula_mid)).strip() or "measure"
+                    today_f = date.today().strftime("%Y-%m-%d")
+                    formula_base_zip = f"{safe_mid_f}_{cfa_type_f}_final_score_formula_{today_f}"
+                    with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                        zf.writestr(f"{formula_base_zip}.xlsx", st.session_state.n2_formula_xlsx_bytes)
+                        zf.writestr(f"{formula_base_zip}.json", st.session_state.n2_formula_json_bytes)
+                    zip_buf.seek(0)
+                    st.download_button(
+                        "⬇️ 批量下载（Excel + JSON）",
+                        data=zip_buf.getvalue(),
+                        file_name=f"{formula_base_zip}.zip",
+                        mime="application/zip",
+                        key="n2_download_formula_zip",
+                    )
+               
+                
 
             # --- 7. 使用公式计分：支持 Dataset4 measure / 上传文件 ---
             has_dual_data = (
@@ -3284,6 +3312,27 @@ def render_batch_cfa():
                                 mime="application/json",
                                 key=f"batch_dl_formula_json_{m_name}"
                             )
+                            
+                # ✅ 新增：批量下载（Excel + JSON 打包 ZIP）
+                st.markdown("")
+                if st.session_state.get(f"batch_formula_xlsx_bytes_{m_name}") and st.session_state.get(f"batch_formula_json_bytes_{m_name}"):
+                    import zipfile
+                    zip_buf = io.BytesIO()
+                    cfa_type = "prelim_single_cfa" if st.session_state.get("batch_prelim") else "single_cfa"
+                    safe_mid = re.sub(r'[\\/:*?"<>|]+', '_', str(mid)).strip() or "measure"
+                    today = date.today().strftime("%Y-%m-%d")
+                    formula_base_zip = f"{safe_mid}_{cfa_type}_final_score_formula_{today}"
+                    with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                        zf.writestr(f"{formula_base_zip}.xlsx", st.session_state[f"batch_formula_xlsx_bytes_{m_name}"])
+                        zf.writestr(f"{formula_base_zip}.json", st.session_state[f"batch_formula_json_bytes_{m_name}"])
+                    zip_buf.seek(0)
+                    st.download_button(
+                        "⬇️ 批量下载（Excel + JSON）",
+                        data=zip_buf.getvalue(),
+                        file_name=f"{formula_base_zip}.zip",
+                        mime="application/zip",
+                        key=f"batch_dl_formula_zip_{m_name}",
+                    )
 
 
 
