@@ -1672,8 +1672,13 @@ def render_multi_cfa():
 
     if has_dual_data and data_source_choice == "四数据集 (Dataset → Measure)":
         from data_cleaning_dual import get_dual_mode_analysis_df
-        dataset_names = ["Dataset1", "Dataset2", "Dataset4"]
-        selected_dataset = st.selectbox("1. 选择数据集", dataset_names, key="n3_dual_dataset")
+            dataset_names = ["Dataset1", "Dataset2", "Dataset4"]
+            selected_dataset = st.selectbox(
+                "1. 选择数据集",
+                dataset_names,
+                index=dataset_names.index("Dataset4"),
+                key="n3_dual_dataset",
+            )
         measure_names = list(st.session_state.dc_measures.keys())
         if not measure_names:
             st.warning("请在数据清洗模块的「Measure 划分」中至少定义一个 Measure。")
@@ -3390,6 +3395,23 @@ def render_batch_multi_cfa():
         return
 
     base_df = st.session_state.batch_df_numeric.copy()
+    # 若四数据集模式可用，强制使用 Dataset4 数据
+    if st.session_state.get("dc_merge_done") and st.session_state.get("dc_dataset_full"):
+        df4 = st.session_state.dc_dataset_full.get("Dataset4")
+        if df4 is not None and not df4.empty:
+            all_needed_cols = set()
+            for m in confirmed_measures:
+                if m in st.session_state.batch_confirmed:
+                    all_needed_cols.update(st.session_state.batch_confirmed[m]["final"]["items"])
+            available_cols = [c for c in all_needed_cols if c in df4.columns]
+            if available_cols:
+                base_df = df4[available_cols].apply(pd.to_numeric, errors="coerce").dropna(how="any")
+                if base_df.empty:
+                    st.warning("Dataset4 中无有效样本，回退到 Single-Factor CFA 原始数据。")
+                    base_df = st.session_state.batch_df_numeric.copy()
+            else:
+                st.warning("Dataset4 中缺少所需题目列，回退到 Single-Factor CFA 原始数据。")
+                base_df = st.session_state.batch_df_numeric.copy()
 
     # ==========================================================
     # 1. 创建 Measure Group
