@@ -3395,12 +3395,11 @@ def render_batch_cfa():
                 item_detail_rows = []
                 for idx_i, item in enumerate(final_items, start=1):
                     _, num, text = parse_item_col(item)
-                    rev = "1" if _is_reverse_coded(item) else "0"
+                    rev = "是" if _is_reverse_coded(item) else "否"
                     # 下划线替换为空格，显示更友好
                     display_text = (text or item).replace("_", " ")
                     item_detail_rows.append({
-                        "序号": idx_i,
-                        "题目文本": display_text,
+                        "列名": item
                     })
                 if item_detail_rows:
                     df_display = pd.DataFrame(item_detail_rows)
@@ -3409,18 +3408,12 @@ def render_batch_cfa():
                         use_container_width=True,
                         hide_index=True,
                         column_config={
-                            "题目文本": st.column_config.TextColumn(
-                                "题目文本",
-                                width="large",
-                                max_chars=None,  # 不截断，完整显示
-                            ),
-                            "序号": st.column_config.NumberColumn("序号", width="small"),
+                            "列名": st.column_config.TextColumn("列名", width="medium")
                         }
                     )
                 else:
                     st.caption("无保留题目")
                 st.markdown("---")
-
 
 
 
