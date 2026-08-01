@@ -2540,7 +2540,7 @@ def render_batch_cfa():
                 else:
                     status = "❌ 两标准均删除"
                 
-                rev = "r" if _is_reverse_coded(item) else ""
+                rev = "1" if _is_reverse_coded(item) else "0"
                 
                 compare_rows.append({
                     "题目": item,
