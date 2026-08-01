@@ -3383,7 +3383,7 @@ def render_batch_cfa():
                 item_detail_rows = []
                 for idx_i, item in enumerate(final_items, start=1):
                     _, num, text = parse_item_col(item)
-                    rev = "是" if _is_reverse_coded(item) else "否"
+                    rev = "1" if _is_reverse_coded(item) else "0"
                     # 下划线替换为空格，显示更友好
                     display_text = (text or item).replace("_", " ")
                     item_detail_rows.append({
