@@ -3400,9 +3400,7 @@ def render_batch_cfa():
                     display_text = (text or item).replace("_", " ")
                     item_detail_rows.append({
                         "序号": idx_i,
-                        "列名": item,
                         "题目文本": display_text,
-                        "反向题": rev,
                     })
                 if item_detail_rows:
                     df_display = pd.DataFrame(item_detail_rows)
@@ -3416,9 +3414,7 @@ def render_batch_cfa():
                                 width="large",
                                 max_chars=None,  # 不截断，完整显示
                             ),
-                            "列名": st.column_config.TextColumn("列名", width="medium"),
                             "序号": st.column_config.NumberColumn("序号", width="small"),
-                            "反向题": st.column_config.TextColumn("反向题", width="small"),
                         }
                     )
                 else:
