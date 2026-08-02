@@ -2011,7 +2011,7 @@ def run_auto_cfa_two_stages(df_clean, factor_name, method_name,
     best_overall = res
     best_score = res['cfi'] + res['tli']
     
-    if not (res['cfi'] >= 0.90 and res['tli'] >= 0.90):
+    if not (res['cfi'] > 0.90 and res['tli'] > 0.90):
         round_num = 1
         while len(s1_items) > min_items_limit and round_num <= 30:
             test_results = _try_all_deletions(
@@ -2026,7 +2026,7 @@ def run_auto_cfa_two_stages(df_clean, factor_name, method_name,
                 break
             valid.sort(key=lambda x: x['score'], reverse=True)
             best = valid[0]
-            if best['score'] < 0 and (res['cfi'] < 0.90 or res['tli'] < 0.90):
+            if best['score'] < 0 and (res['cfi'] <= 0.90 or res['tli'] <= 0.90):
                 break
             s1_items = best['items']
             s1_method = [m for m in s1_method if m in s1_items]
@@ -2043,7 +2043,7 @@ def run_auto_cfa_two_stages(df_clean, factor_name, method_name,
             if best['cfi'] + best['tli'] > best_score:
                 best_score = best['cfi'] + best['tli']
                 best_overall = best
-            if best['cfi'] >= 0.90 and best['tli'] >= 0.90:
+            if best['cfi'] > 0.90 and best['tli'] > 0.90:
                 break
             round_num += 1
     
@@ -2072,7 +2072,7 @@ def run_auto_cfa_two_stages(df_clean, factor_name, method_name,
     best_overall2 = res2
     best_score2 = res2['cfi'] + res2['tli']
     
-    already_high = res2['cfi'] >= 0.95 and res2['tli'] >= 0.95
+    already_high = res2['cfi'] > 0.95 and res2['tli'] > 0.95
     already_compact = res2['n_items'] <= target_n
     
     if not (already_high or already_compact):
@@ -2107,7 +2107,7 @@ def run_auto_cfa_two_stages(df_clean, factor_name, method_name,
             if best['cfi'] + best['tli'] > best_score2:
                 best_score2 = best['cfi'] + best['tli']
                 best_overall2 = best
-            if (best['cfi'] >= 0.95 and best['tli'] >= 0.95) or best['n_items'] <= target_n:
+            if (best['cfi'] > 0.95 and best['tli'] > 0.95) or best['n_items'] <= target_n:
                 break
             round_num += 1
     
@@ -2129,8 +2129,8 @@ def run_auto_cfa_two_stages(df_clean, factor_name, method_name,
 def render_batch_cfa():
     st.markdown("""
     本模块支持从已保存的子数据集中批量运行多个 Measure 的自动删题 CFA 分析。
-    - *Stage 1（保质量）*：保证 CFI ≥ 0.90、TLI ≥ 0.90，未达标自动删题
-    - *Stage 2（求精简）*：追求 CFI ≥ 0.95、TLI ≥ 0.95，同时精简至目标题数
+    - *Stage 1（保质量）*：保证 CFI > 0.90、TLI > 0.90，未达标自动删题
+    - *Stage 2（求精简）*：追求 CFI > 0.95、TLI > 0.95，同时精简至目标题数
     """)
 
   
