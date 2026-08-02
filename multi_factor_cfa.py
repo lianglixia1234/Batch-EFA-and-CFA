@@ -3675,6 +3675,36 @@ def render_batch_multi_cfa():
             compare_df = pd.DataFrame(compare_data)
             st.dataframe(compare_df, use_container_width=True, hide_index=True)
 
+            # ---- 5.1b 两标准题目保留对比 ----
+            st.markdown("##### 📋 两标准题目保留对比")
+            all_items_comparison = []
+            all_measures = set()
+            if s1_final and 'measure_items_map' in s1_final:
+                all_measures.update(s1_final['measure_items_map'].keys())
+            if s2_final and 'measure_items_map' in s2_final:
+                all_measures.update(s2_final['measure_items_map'].keys())
+
+            for m in sorted(all_measures):
+                s1_items = set(s1_final.get('measure_items_map', {}).get(m, [])) if s1_final else set()
+                s2_items = set(s2_final.get('measure_items_map', {}).get(m, [])) if s2_final else set()
+                all_items = sorted(s1_items | s2_items)
+                for item in all_items:
+                    in_s1 = item in s1_items
+                    in_s2 = item in s2_items
+                    all_items_comparison.append({
+                        "来源 Measure": m,
+                        "题目": item,
+                        "标准1保留": "✅" if in_s1 else "❌",
+                        "标准2保留": "✅" if in_s2 else "❌",
+                        "两标准都保留": "✅" if (in_s1 and in_s2) else "❌",
+                    })
+
+            if all_items_comparison:
+                compare_items_df = pd.DataFrame(all_items_comparison)
+                st.dataframe(compare_items_df, use_container_width=True, hide_index=True)
+            else:
+                st.caption("无题目对比数据。")
+
             # ---- 5.2 Stage 1 / Stage 2 详细结果 ----
             detail_tabs = st.tabs(["标准1（保质量）详情", "标准2（求精简）详情"])
 
