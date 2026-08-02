@@ -3957,7 +3957,7 @@ def render_batch_multi_cfa():
                     user = st.session_state.get("user_name", "unknown_user")
                     safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user)).strip() or "unknown_user"
                     cfa_type = "prelim_multi_cfa" if st.session_state.get("n4_prelim") else "multi_cfa"
-                    scored_base = f"{mgid_dl}_{cfa_type}_scored_{today}"
+                    scored_base = f"{mgid_dl}_{cfa_type}_dataset4_scored_{today}"
                     with dl_c1:
                         if st.session_state.get(f"n4_scored_csv_{group['name']}"):
                             st.download_button(
