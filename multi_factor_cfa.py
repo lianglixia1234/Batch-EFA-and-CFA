@@ -4112,13 +4112,13 @@ def render_batch_multi_cfa():
                                 preview_flat[col] = val
                         st.dataframe(preview_flat.head(20), use_container_width=True)
 
-                    dl_f1, dl_f2, dl_f3, dl_f4 = st.columns(4)
+                    dl_f1, dl_f2, dl_f3, dl_f4, dl_f5 = st.columns(5)
                     mgid_f = _safe_filename_part(str(measuregroup_title).strip() or "measuregroup", "measuregroup")
                     today_f = date.today().strftime("%Y-%m-%d")
                     user_f = st.session_state.get("user_name", "unknown_user")
                     safe_user_f = re.sub(r'[\\/:*?"<>|]+', '_', str(user_f)).strip() or "unknown_user"
                     cfa_type_f = "prelim_multi_cfa" if st.session_state.get("n4_prelim") else "multi_cfa"
-                    formula_base = f"{mgid_f}_{cfa_type_f}_final_score_formula_{today_f}"
+                    formula_base = f"{mgid_f}_{cfa_type_f}_final_score_formula_{today_f}_{safe_user_f}"
                     with dl_f1:
                         if st.session_state.get(f"n4_formula_csv_{group['name']}"):
                             st.download_button(
@@ -4174,6 +4174,42 @@ def render_batch_multi_cfa():
                                     st.error(f"保存失败: {msg}")
                             else:
                                 st.error("公式表未就绪，请先生成公式参数表。")
+                    with dl_f5:
+                        # 批量下载：Excel + JSON 打包成 zip
+                        xlsx_bytes = st.session_state.get(f"n4_formula_xlsx_{group['name']}")
+                        m_df_f = st.session_state.get(f"n4_formula_measure_df_{group['name']}")
+                        i_df_f = st.session_state.get(f"n4_formula_items_df_{group['name']}")
+                        has_json = m_df_f is not None and i_df_f is not None
+                        if xlsx_bytes and has_json:
+                            import zipfile
+                            zip_buf = io.BytesIO()
+                            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                                zf.writestr(f"{formula_base}.xlsx", xlsx_bytes)
+                                if build_formula_params_json:
+                                    json_b = build_formula_params_json(m_df_f, i_df_f).encode("utf-8")
+                                else:
+                                    import json
+                                    def _native(v):
+                                        if v is None or isinstance(v, (str, int, float, bool)):
+                                            return v
+                                        if hasattr(v, "item"):
+                                            v = float(v) if hasattr(v, "__float__") else v
+                                            return None if (v != v or abs(v) == float("inf")) else v
+                                        return str(v) if hasattr(v, "isoformat") else v
+                                    m_dict_f = {k: _native(v) for k, v in m_df_f.iloc[0].to_dict().items()}
+                                    items_list_f = [{k: _native(v) for k, v in r.items()} for r in i_df_f.to_dict(orient="records")]
+                                    json_b = json.dumps({"schema_version": 1, "measure": m_dict_f, "items": items_list_f}, ensure_ascii=False, indent=2).encode("utf-8")
+                                zf.writestr(f"{formula_base}.json", json_b)
+                            zip_buf.seek(0)
+                            st.download_button(
+                                "📦 批量下载（Excel+JSON）",
+                                data=zip_buf.getvalue(),
+                                file_name=f"{formula_base}.zip",
+                                mime="application/zip",
+                                key=f"n4_dl_formula_zip_{group['name']}"
+                            )
+    
+                    
 
     # ==========================================================
     # 6. 全局确认清单（底部看板）
