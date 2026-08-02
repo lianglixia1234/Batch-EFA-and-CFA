@@ -3221,7 +3221,7 @@ def run_auto_multi_cfa_two_stages(
     best_overall = res
     best_score = res['cfi'] + res['tli']
 
-    if not (res['cfi'] >= 0.90 and res['tli'] >= 0.90):
+    if not (res['cfi'] > 0.90 and res['tli'] > 0.90):
         round_num = 1
         while round_num <= 50:
             can_delete = any(len(items) > min_items_limit for items in s1_measure_items.values())
@@ -3245,7 +3245,7 @@ def run_auto_multi_cfa_two_stages(
             valid.sort(key=lambda x: x['score'], reverse=True)
             best = valid[0]
 
-            if best['score'] < 0 and (res['cfi'] < 0.90 or res['tli'] < 0.90):
+            if best['score'] < 0 and (res['cfi'] <= 0.90 or res['tli'] <= 0.90):
                 break
 
             del_m = best['deleted_from_measure']
@@ -3270,7 +3270,7 @@ def run_auto_multi_cfa_two_stages(
                 best_score = best['cfi'] + best['tli']
                 best_overall = best
 
-            if best['cfi'] >= 0.90 and best['tli'] >= 0.90:
+            if best['cfi'] > 0.90 and best['tli'] > 0.90:
                 break
 
             round_num += 1
@@ -3301,7 +3301,7 @@ def run_auto_multi_cfa_two_stages(
     best_overall2 = res2
     best_score2 = res2['cfi'] + res2['tli']
 
-    already_high = res2['cfi'] >= 0.95 and res2['tli'] >= 0.95
+    already_high = res2['cfi'] > 0.95 and res2['tli'] > 0.95
     already_compact = all(n <= target_n for n in res2['per_measure_n'].values()) and \
                       sum(len(v) for v in s2_method_items.values()) <= target_method_n
 
@@ -3354,7 +3354,7 @@ def run_auto_multi_cfa_two_stages(
                 best_score2 = best['cfi'] + best['tli']
                 best_overall2 = best
 
-            stop_cond1 = best['cfi'] >= 0.95 and best['tli'] >= 0.95
+            stop_cond1 = best['cfi'] > 0.95 and best['tli'] > 0.95
             stop_cond2 = all(n <= target_n for n in best['per_measure_n'].values()) and \
                          sum(len(v) for v in s2_method_items.values()) <= target_method_n
             if stop_cond1 or stop_cond2:
