@@ -3394,7 +3394,40 @@ def render_batch_multi_cfa():
         st.warning("未检测到 Single-Factor CFA 的原始数据。请先完成 Single-Factor CFA 批量分析。")
         return
 
-    base_df = st.session_state.batch_df_numeric.copy()
+    # ==========================================================
+    # 强制使用 Dataset4 作为批量 Multi-Factor CFA 数据源
+    # ==========================================================
+    base_df = None
+    df4 = None
+
+    # 优先尝试从四数据集模式获取 Dataset4
+    if st.session_state.get("dc_merge_done") and st.session_state.get("dc_dataset_full"):
+        df4 = st.session_state.dc_dataset_full.get("Dataset4")
+        if df4 is not None and not df4.empty:
+            # 收集所有 confirmed measures 需要的列
+            all_needed_cols = set()
+            for m in confirmed_measures:
+                if m in st.session_state.batch_confirmed:
+                    all_needed_cols.update(st.session_state.batch_confirmed[m]["final"]["items"])
+            # 检查 Dataset4 是否包含这些列
+            available_cols = [c for c in all_needed_cols if c in df4.columns]
+            if available_cols:
+                # 提取并数值化（与 batch_df_numeric 保持一致）
+                base_df = df4[available_cols].apply(pd.to_numeric, errors="coerce").dropna(how="any")
+                if base_df.empty:
+                    st.warning("Dataset4 中无有效样本（数值化后全部缺失），回退到 Single-Factor CFA 原始数据。")
+                    base_df = None
+                else:
+                    st.info(f"✅ 批量模式已强制使用 **Dataset4** 数据：{base_df.shape[0]} 行 × {base_df.shape[1]} 列")
+            else:
+                st.warning("Dataset4 中缺少所需的题目列，回退到 Single-Factor CFA 原始数据。")
+
+    # 回退到 batch_df_numeric
+    if base_df is None:
+        base_df = st.session_state.batch_df_numeric.copy()
+        st.info(f"ℹ️ 批量模式使用 Single-Factor CFA 原始数据：{base_df.shape[0]} 行 × {base_df.shape[1]} 列")
+
+    
     # 若四数据集模式可用，强制使用 Dataset4 数据
     if st.session_state.get("dc_merge_done") and st.session_state.get("dc_dataset_full"):
         df4 = st.session_state.dc_dataset_full.get("Dataset4")
