@@ -3448,10 +3448,8 @@ def render_batch_multi_cfa():
                 if not base_df.empty:
                     st.info(f"✅ 批量模式已强制使用 **Dataset4** 数据：{base_df.shape[0]} 行 × {base_df.shape[1]} 列")
                 else:
-                    st.warning("Dataset4 中无有效样本（数值化后全部缺失），回退到 Single-Factor CFA 原始数据。")
                     base_df = None
-            else:
-                st.warning("Dataset4 中缺少所需的题目列，回退到 Single-Factor CFA 原始数据。")
+                
 
     # ==========================================================
     # 1. 创建 Measure Group
