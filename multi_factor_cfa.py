@@ -2299,7 +2299,7 @@ def render_multi_cfa():
                             user_name = st.session_state.get("user_name", "unknown_user")
                             safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(user_name)).strip() or "unknown_user"
                             today = date.today().strftime("%Y-%m-%d")
-                            st.session_state.n3_cfa_report_filename = f"{measuregroup_id}_multi_cfa_report_{today}_{safe_user}.xlsx"
+                            st.session_state.n3_cfa_report_filename = f"{measuregroup_id}_multi_cfa_report_{today}.xlsx"
                             st.success("已生成下载表。")
                         except Exception as e:
                             st.error(f"生成下载表失败: {e}")
@@ -2406,7 +2406,7 @@ def render_multi_cfa():
                         cfa_dataset_n = int(m.group(1)) if m else 4
                     else:
                         cfa_dataset_n = int(st.session_state.get("n3_cfa_scored_dataset_n", 1))
-                    cfa_scored_base = f"{mgid_dl}_multi_cfa_dataset{cfa_dataset_n}_scored_{cfa_today}_{cfa_safe_user}"
+                    cfa_scored_base = f"{mgid_dl}_multi_cfa_dataset{cfa_dataset_n}_scored_{cfa_today}"
                     with dl_col1:
                         if st.session_state.get("n3_cfa_scored_csv_bytes"):
                             st.download_button(
@@ -2502,7 +2502,7 @@ def render_multi_cfa():
                     cfa_formula_user = st.session_state.get("user_name", "unknown_user")
                     cfa_formula_safe_user = re.sub(r'[\\/:*?"<>|]+', '_', str(cfa_formula_user)).strip() or "unknown_user"
                     cfa_formula_today = date.today().strftime("%Y-%m-%d")
-                    cfa_formula_base = f"{cfa_formula_mgid}_multi_cfa_final_score_formula_{cfa_formula_today}_{cfa_formula_safe_user}"
+                    cfa_formula_base = f"{cfa_formula_mgid}_multi_cfa_final_score_formula_{cfa_formula_today}"
                     with cf_dl1:
                         if st.session_state.get("n3_cfa_formula_csv_bytes"):
                             st.download_button(
