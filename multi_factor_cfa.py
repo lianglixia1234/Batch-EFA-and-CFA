@@ -3173,12 +3173,12 @@ def _score_for_stage2_multi(r, current_cfi, current_tli):
         return -9999
     if cfi < 0.90 or tli < 0.90:
         return -9999
-    if cfi >= 0.95 and tli >= 0.95:
+    if cfi > 0.95 and tli > 0.95:
         return 10000 + cfi * 100 + tli * 100 - r['n_items'] * 50
     gap_before = max(0, 0.95 - current_cfi) + max(0, 0.95 - current_tli)
     gap_after = max(0, 0.95 - cfi) + max(0, 0.95 - tli)
     improvement = gap_before - gap_after
-    if improvement <= 0 and (current_cfi >= 0.95 and current_tli >= 0.95):
+    if improvement <= 0 and (current_cfi > 0.95 and current_tli > 0.95):
         return -1000
     return improvement * 1000 + cfi * 10 + tli * 10
 
@@ -3378,8 +3378,8 @@ def run_auto_multi_cfa_two_stages(
 def render_batch_multi_cfa():
     st.markdown("""
     本模块基于 **Single-Factor CFA** 的确认结果，批量运行 **Multi-Factor Correlated CFA** 自动删题。
-    - *Stage 1（保质量）*：保证 CFI ≥ 0.90、TLI ≥ 0.90，未达标自动删题
-    - *Stage 2（求精简）*：追求 CFI ≥ 0.95、TLI ≥ 0.95，同时精简每个 Measure 至目标题数
+    - *Stage 1（保质量）*：保证 CFI > 0.90、TLI > 0.90，未达标自动删题
+    - *Stage 2（求精简）*：追求 CFI > 0.95、TLI > 0.95，同时精简每个 Measure 至目标题数
     """)
 
     # ==========================================================
