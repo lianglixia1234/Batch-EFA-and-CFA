@@ -3696,7 +3696,7 @@ def render_batch_multi_cfa():
                         "题目": item,
                         "标准1保留": "✅" if in_s1 else "❌",
                         "标准2保留": "✅" if in_s2 else "❌",
-                        "两标准都保留": "✅" if (in_s1 and in_s2) else "❌",
+
                     })
 
             if all_items_comparison:
