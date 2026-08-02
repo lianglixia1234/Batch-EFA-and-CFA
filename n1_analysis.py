@@ -1277,7 +1277,7 @@ def _run_auto_cfa_for_measure(sub_name, df_clean, clean_to_orig, factor_name, me
         # 【修改②】使用传入的 threshold 参数判断达标
         if cfi >= threshold and tli >= threshold:
             trace_logs.append({"round": current_step+1, "items": current_count,
-                               "cfi": cfi, "tli": tli, "action": "✨ 达标！", "deleted": "无"})
+                               "cfi": cfi, "tli": tli, "action": "达标！", "deleted": "无"})
             _save_cfa_result(sub_name, best_payload, trace_logs, df_sub, active_factor, active_method)
             return
 
