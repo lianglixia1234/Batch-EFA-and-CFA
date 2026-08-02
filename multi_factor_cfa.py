@@ -3697,7 +3697,6 @@ def render_batch_multi_cfa():
                         for h in history:
                             row = {
                                 '轮次': h['round'],
-                                '操作': h['action'],
                                 '删除题目': h['deleted_item'] or '-',
                                 '来源Measure': h.get('deleted_from_measure', '-'),
                                 '总题数': h['n_items'],
