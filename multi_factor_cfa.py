@@ -3415,7 +3415,6 @@ def render_batch_multi_cfa():
                 # 提取并数值化（与 batch_df_numeric 保持一致）
                 base_df = df4[available_cols].apply(pd.to_numeric, errors="coerce").dropna(how="any")
                 if base_df.empty:
-                    st.warning("Dataset4 中无有效样本（数值化后全部缺失），回退到 Single-Factor CFA 原始数据。")
                     base_df = None
                 else:
                     st.info(f"✅ 批量模式已强制使用 **Dataset4** 数据：{base_df.shape[0]} 行 × {base_df.shape[1]} 列")
