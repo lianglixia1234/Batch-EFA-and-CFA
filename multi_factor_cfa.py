@@ -3430,21 +3430,29 @@ def render_batch_multi_cfa():
     
     # 若四数据集模式可用，强制使用 Dataset4 数据
     if st.session_state.get("dc_merge_done") and st.session_state.get("dc_dataset_full"):
+        # 在 multi_factor_cfa.py 的 render_batch_multi_cfa() 中
         df4 = st.session_state.dc_dataset_full.get("Dataset4")
         if df4 is not None and not df4.empty:
+            # ✅ 关键修复：清洗 Dataset4 列名，与 single-factor batch 模式保持一致
+            df4_cleaned = df4.copy()
+            df4_cleaned.columns = [re.sub(r'[^\w\u4e00-\u9fa5]', '_', str(c)) for c in df4_cleaned.columns]
+            
             all_needed_cols = set()
             for m in confirmed_measures:
                 if m in st.session_state.batch_confirmed:
                     all_needed_cols.update(st.session_state.batch_confirmed[m]["final"]["items"])
-            available_cols = [c for c in all_needed_cols if c in df4.columns]
+            
+            # 用清洗后的 df4 做匹配
+            available_cols = [c for c in all_needed_cols if c in df4_cleaned.columns]
             if available_cols:
-                base_df = df4[available_cols].apply(pd.to_numeric, errors="coerce").dropna(how="any")
-                if base_df.empty:
-                    st.warning("Dataset4 中无有效样本，回退到 Single-Factor CFA 原始数据。")
-                    base_df = st.session_state.batch_df_numeric.copy()
+                base_df = df4_cleaned[available_cols].apply(pd.to_numeric, errors="coerce").dropna(how="any")
+                if not base_df.empty:
+                    st.info(f"✅ 批量模式已强制使用 **Dataset4** 数据：{base_df.shape[0]} 行 × {base_df.shape[1]} 列")
+                else:
+                    st.warning("Dataset4 中无有效样本（数值化后全部缺失），回退到 Single-Factor CFA 原始数据。")
+                    base_df = None
             else:
-                st.warning("Dataset4 中缺少所需题目列，回退到 Single-Factor CFA 原始数据。")
-                base_df = st.session_state.batch_df_numeric.copy()
+                st.warning("Dataset4 中缺少所需的题目列，回退到 Single-Factor CFA 原始数据。")
 
     # ==========================================================
     # 1. 创建 Measure Group
