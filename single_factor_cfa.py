@@ -2549,10 +2549,8 @@ def render_batch_cfa():
                 
                 compare_rows.append({
                     "题目": item,
-                    "反向题": rev,
-                    "标准1（保质量）": "保留" if in_s1 else "删除",
-                    "标准2（求精简）": "保留" if in_s2 else "删除",
-                    "差异说明": status,
+                    "标准1（保质量）": "✅" if in_s1 else "❌",
+                    "标准2（求精简）": "✅" if in_s2 else "❌",
                 })
             
             compare_df = pd.DataFrame(compare_rows)
