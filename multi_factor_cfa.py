@@ -4224,6 +4224,37 @@ def render_batch_multi_cfa():
         summary_df = pd.DataFrame(summary_rows)
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
+        # ✅ 新增：查看各 Group 保留的题目详情
+        with st.expander("🔍 查看各 Measure Group 保留的题目详情", expanded=False):
+            for g_name, payload in confirmed_groups.items():
+                st.markdown(f"**{g_name}**（{payload.get('stage_label', '-')}，总题数 {payload['final']['n_items']}）")
+                
+                final = payload['final']
+                measure_items_map = final.get('measure_items_map', {})
+                
+                item_detail_rows = []
+                for m_name, items in measure_items_map.items():
+                    for item in items:
+                        item_detail_rows.append({
+                            "Measure": m_name,
+                            "题目": item,
+                        })
+                
+                if item_detail_rows:
+                    df_display = pd.DataFrame(item_detail_rows)
+                    st.dataframe(
+                        df_display,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Measure": st.column_config.TextColumn("Measure", width="medium"),
+                            "题目": st.column_config.TextColumn("题目", width="large"),
+                        }
+                    )
+                else:
+                    st.caption("无保留题目")
+                st.markdown("---")
+
 
 
 
